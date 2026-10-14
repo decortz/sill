@@ -127,14 +127,14 @@ Ingrese a **Servicios**. El módulo contiene las pestañas **Registro de Servici
 2. Ingrese la **Orden de Trabajo** y la **Planilla**, cuando correspondan.
 3. Seleccione el **ID Llanta**.
 4. Seleccione la **Fecha del Servicio**.
-5. Confirme el **Kilometraje** y la **Posición de la llanta**.
+5. Confirme el **Kilometraje**. La posición de la llanta se muestra solo como referencia y no se puede cambiar desde este formulario.
 6. Registre las profundidades interna, central y externa.
 7. Marque los trabajos realizados: balanceo, reparación, despinche, regrabación, torqueo o inspección.
 8. Si corresponde, registre los insumos utilizados.
 9. Seleccione o escriba el **Operario**.
 10. Seleccione **Registrar Servicio**.
 
-Solo se pueden registrar servicios para llantas montadas. La posición es obligatoria.
+Solo se pueden registrar servicios para llantas montadas y con posición asignada. Los cambios de posición se hacen únicamente en **Rotación Completa**.
 
 ### Montar una llanta
 
@@ -283,7 +283,7 @@ Verifique que la llanta pertenezca al cliente seleccionado y tenga una disponibi
 
 ### No puedo registrar un servicio
 
-Verifique que la llanta esté montada, que la posición esté informada y que el kilometraje sea válido.
+Verifique que la llanta esté montada, que tenga posición asignada (si no la tiene, asígnela en **Rotación Completa**) y que el kilometraje sea válido.
 
 ### No puedo ejecutar una rotación
 
