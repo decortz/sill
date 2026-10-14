@@ -14,6 +14,9 @@ SHEET_USUARIOS = "usuarios"
 SHEET_MOVIMIENTOS = "movimientos"
 SHEET_ALINEACIONES = "alineaciones"
 
+# Tipos de registro de la tabla servicios que corresponden a movimientos
+TIPOS_MOVIMIENTO = ['montaje', 'desmontaje', 'rotacion', 'aprobacion_reencauche']
+
 # Configuración de la página con colores personalizados
 st.set_page_config(page_title="Sistema Integrado de Llantas", layout="wide", initial_sidebar_state="expanded")
 
@@ -226,6 +229,45 @@ def filtrar_por_clientes(df, columna_nit, clientes_acceso):
     clientes_acceso_str = [str(c).strip() for c in clientes_acceso]
     return df[df[columna_nit].astype(str).str.strip().isin(clientes_acceso_str)]
 
+def texto_limpio(valor):
+    """Convierte un valor a texto, devolviendo '' para vacíos/NaN/None"""
+    if valor is None:
+        return ''
+    try:
+        if pd.isna(valor):
+            return ''
+    except (TypeError, ValueError):
+        pass
+    texto = str(valor).strip()
+    return '' if texto.lower() in ('nan', 'none') else texto
+
+def normalizar_posicion(posicion):
+    """Normaliza una posición para compararla (ej: '1.0' → '1', 'di' → 'DI')"""
+    pos = texto_limpio(posicion)
+    try:
+        return str(int(float(pos)))
+    except (ValueError, TypeError):
+        return pos.upper()
+
+def parsear_fecha(valor):
+    """Convierte una fecha guardada (dd/mm/aaaa o aaaa-mm-dd) a date; None si no se puede"""
+    texto = texto_limpio(valor)
+    if not texto:
+        return None
+    for formato in ("%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(texto[:10], formato).date()
+        except ValueError:
+            continue
+    fecha = pd.to_datetime(texto, errors='coerce', dayfirst=True)
+    return None if pd.isna(fecha) else fecha.date()
+
+def formatear_fecha_como(valor_original, fecha):
+    """Formatea una fecha con el mismo formato que tenía el valor original"""
+    if '-' in texto_limpio(valor_original)[:10]:
+        return fecha.strftime("%Y-%m-%d")
+    return fecha.strftime("%d/%m/%Y")
+
 def existe_valor(df, columna, valor):
     """Verifica si un valor existe en una columna de forma segura"""
     if df.empty or columna not in df.columns:
@@ -424,6 +466,33 @@ def actualizar_costos_km_llanta(id_llanta):
     
     except Exception as e:
         return False
+
+def recalcular_costos_km_lote(df_llantas, df_servicios, ids_llantas):
+    """
+    Recalcula en memoria los costos/km de varias llantas (misma lógica que
+    actualizar_costos_km_llanta) y retorna df_llantas actualizado, sin escribirlo.
+    """
+    df_llantas = df_llantas.copy()
+    ids = set(str(i) for i in ids_llantas)
+    servicios = df_servicios.copy() if not df_servicios.empty else pd.DataFrame(columns=['id_llanta', 'vida', 'kilometraje'])
+    servicios['id_llanta'] = servicios['id_llanta'].astype(str)
+    servicios['vida'] = pd.to_numeric(servicios['vida'], errors='coerce')
+    servicios['kilometraje'] = pd.to_numeric(servicios['kilometraje'], errors='coerce')
+
+    for idx, llanta in df_llantas[df_llantas['id_llanta'].astype(str).isin(ids)].iterrows():
+        vida_val = pd.to_numeric(llanta.get('vida_actual', 1), errors='coerce')
+        vida_actual = int(vida_val) if pd.notna(vida_val) else 1
+        for v in range(1, min(vida_actual + 1, 4) + 1):
+            costo_col = f'costo_km_vida{v}'
+            precio = pd.to_numeric(llanta.get(f'precio_vida{v}'), errors='coerce')
+            srv_vida = servicios[(servicios['id_llanta'] == str(llanta['id_llanta'])) & (servicios['vida'] == v)]
+            costo = None
+            if pd.notna(precio) and len(srv_vida) >= 2:
+                km_recorridos = srv_vida['kilometraje'].max() - srv_vida['kilometraje'].min()
+                if km_recorridos > 0:
+                    costo = round(float(precio) / km_recorridos, 2)
+            df_llantas.loc[idx, costo_col] = costo
+    return df_llantas
 
 def tiene_acceso_cliente(nit_cliente):
     """Verifica si el usuario tiene acceso al cliente especificado"""
@@ -727,6 +796,313 @@ def subir_datos_csv():
             st.info("Asegúrate de que el CSV tenga las columnas correctas y esté codificado en UTF-8")
 
 # ============= FUNCIÓN: ELIMINAR Y CORREGIR DATOS =============
+# ============= EDICIÓN DE ROTACIONES Y ALINEACIONES =============
+def obtener_rotaciones(df_servicios):
+    """
+    Agrupa los registros de cada rotación de llanta.
+    Cada rotación guarda dos filas en servicios: el servicio (con posicion_nueva)
+    y el movimiento (con la posición nueva en 'posicion'). Se emparejan por llanta,
+    placa, kilometraje y posición nueva.
+    """
+    if df_servicios.empty or 'tipo_servicio' not in df_servicios.columns:
+        return []
+
+    df_rot = df_servicios[df_servicios['tipo_servicio'] == 'rotacion'].copy()
+    if df_rot.empty:
+        return []
+
+    df_rot['_ts'] = pd.to_datetime(df_rot['timestamp'], errors='coerce', utc=True, format='mixed') if 'timestamp' in df_rot.columns else pd.NaT
+    pos_nueva_col = df_rot['posicion_nueva'].apply(texto_limpio) if 'posicion_nueva' in df_rot.columns else pd.Series('', index=df_rot.index)
+    df_srv = df_rot[pos_nueva_col != '']
+    df_mov = df_rot[pos_nueva_col == '']
+
+    rotaciones = []
+    movs_usados = set()
+
+    for _, srv in df_srv.iterrows():
+        candidatos = df_mov[
+            (~df_mov['id_servicio'].isin(movs_usados)) &
+            (df_mov['id_llanta'].astype(str) == str(srv['id_llanta'])) &
+            (df_mov['placa_vehiculo'].astype(str) == str(srv.get('placa_vehiculo', ''))) &
+            (pd.to_numeric(df_mov['kilometraje'], errors='coerce') == pd.to_numeric(srv.get('kilometraje'), errors='coerce')) &
+            (df_mov['posicion'].apply(normalizar_posicion) == normalizar_posicion(srv.get('posicion_nueva')))
+        ]
+        mov = None
+        if not candidatos.empty:
+            if pd.notna(srv['_ts']) and candidatos['_ts'].notna().any():
+                mov = candidatos.loc[(candidatos['_ts'] - srv['_ts']).abs().idxmin()]
+            else:
+                mov = candidatos.iloc[0]
+            movs_usados.add(mov['id_servicio'])
+
+        rotaciones.append({
+            'id_servicio': srv['id_servicio'],
+            'id_movimiento': mov['id_servicio'] if mov is not None else '',
+            'id_llanta': str(srv['id_llanta']),
+            'placa_vehiculo': texto_limpio(srv.get('placa_vehiculo')),
+            'kilometraje': pd.to_numeric(srv.get('kilometraje'), errors='coerce'),
+            'fecha': texto_limpio(srv.get('fecha')),
+            'fecha_mov': texto_limpio(mov.get('fecha')) if mov is not None else '',
+            'pos_anterior': texto_limpio(srv.get('posicion')),
+            'pos_nueva': texto_limpio(srv.get('posicion_nueva')),
+            'orden_trabajo': texto_limpio(srv.get('orden_trabajo')),
+            'planilla': texto_limpio(srv.get('planilla')),
+            'operario': texto_limpio(srv.get('operario')),
+            'ts': srv['_ts'],
+        })
+
+    # Movimientos de rotación sin servicio asociado
+    for _, mov in df_mov[~df_mov['id_servicio'].isin(movs_usados)].iterrows():
+        obs = texto_limpio(mov.get('observaciones'))
+        pos_anterior = ''
+        if '→' in obs:
+            pos_anterior = obs.split('→')[0].replace('Rotación:', '').strip()
+        rotaciones.append({
+            'id_servicio': '',
+            'id_movimiento': mov['id_servicio'],
+            'id_llanta': str(mov['id_llanta']),
+            'placa_vehiculo': texto_limpio(mov.get('placa_vehiculo')),
+            'kilometraje': pd.to_numeric(mov.get('kilometraje'), errors='coerce'),
+            'fecha': '',
+            'fecha_mov': texto_limpio(mov.get('fecha')),
+            'pos_anterior': pos_anterior,
+            'pos_nueva': texto_limpio(mov.get('posicion')),
+            'orden_trabajo': texto_limpio(mov.get('orden_trabajo')),
+            'planilla': texto_limpio(mov.get('planilla')),
+            'operario': texto_limpio(mov.get('operario')),
+            'ts': mov['_ts'],
+        })
+
+    rotaciones.sort(key=lambda r: r['ts'] if pd.notna(r['ts']) else pd.Timestamp.min.tz_localize('UTC'), reverse=True)
+    return rotaciones
+
+def editar_rotaciones():
+    """Pestaña para editar o eliminar la rotación de una llanta (servicio + movimiento)"""
+    st.subheader("Gestión de Rotaciones")
+    st.caption("Cada cambio se aplica al servicio y al movimiento de la rotación de la llanta seleccionada.")
+
+    df_llantas = filtrar_por_clientes(leer_hoja(SHEET_LLANTAS), 'nit_cliente', obtener_clientes_accesibles())
+    llantas_accesibles = set(df_llantas['id_llanta'].astype(str)) if not df_llantas.empty else set()
+
+    todas_rotaciones = [r for r in obtener_rotaciones(leer_hoja(SHEET_SERVICIOS)) if r['id_llanta'] in llantas_accesibles]
+    rotaciones = todas_rotaciones
+    if not rotaciones:
+        st.info("No hay rotaciones registradas para tus clientes")
+        return
+
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        placas = ['Todas'] + sorted({r['placa_vehiculo'] for r in rotaciones if r['placa_vehiculo']})
+        filtro_placa = st.selectbox("Vehículo", options=placas, key="rot_edit_filtro_placa")
+    if filtro_placa != 'Todas':
+        rotaciones = [r for r in rotaciones if r['placa_vehiculo'] == filtro_placa]
+    with col_f2:
+        llantas = ['Todas'] + sorted({r['id_llanta'] for r in rotaciones})
+        filtro_llanta = st.selectbox("Llanta", options=llantas, key="rot_edit_filtro_llanta")
+    if filtro_llanta != 'Todas':
+        rotaciones = [r for r in rotaciones if r['id_llanta'] == filtro_llanta]
+
+    rot_por_clave = {(r['id_servicio'] or r['id_movimiento']): r for r in rotaciones}
+
+    def formato_rotacion(clave):
+        r = rot_por_clave[clave]
+        km = f"{r['kilometraje']:,.0f}" if pd.notna(r['kilometraje']) else 'N/A'
+        return f"{r['fecha'] or r['fecha_mov']} | {r['placa_vehiculo']} | Llanta {r['id_llanta']} | {r['pos_anterior'] or '?'} → {r['pos_nueva']} | Km {km}"
+
+    clave = st.selectbox("Seleccionar Rotación", options=list(rot_por_clave.keys()),
+                         format_func=formato_rotacion, key="rot_edit_select")
+    rot = rot_por_clave[clave]
+
+    # ¿Es la rotación más reciente de la llanta y sigue en esa posición?
+    llanta = df_llantas[df_llantas['id_llanta'].astype(str) == rot['id_llanta']].iloc[0]
+    posteriores = [r for r in todas_rotaciones
+                   if r['id_llanta'] == rot['id_llanta'] and pd.notna(r['ts']) and pd.notna(rot['ts']) and r['ts'] > rot['ts']]
+    es_ultima = (not posteriores
+                 and texto_limpio(llanta.get('disponibilidad')) == 'al_piso'
+                 and texto_limpio(llanta.get('placa_actual')) == rot['placa_vehiculo']
+                 and normalizar_posicion(llanta.get('posicion_actual')) == normalizar_posicion(rot['pos_nueva']))
+
+    st.info(f"**Llanta:** {rot['id_llanta']} | **Vehículo:** {rot['placa_vehiculo']} | "
+            f"**Rotación:** {rot['pos_anterior'] or '?'} → {rot['pos_nueva']} | "
+            f"**Servicio:** {rot['id_servicio'] or 'no encontrado'} | **Movimiento:** {rot['id_movimiento'] or 'no encontrado'}")
+    if es_ultima:
+        st.caption("📍 Es la rotación más reciente de esta llanta: al guardar también se actualiza su posición actual.")
+    else:
+        st.caption("ℹ️ La llanta ya cambió de posición después de esta rotación: los cambios no modifican su posición actual.")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        fecha_original = rot['fecha'] or rot['fecha_mov']
+        nueva_fecha = st.date_input("Fecha", value=parsear_fecha(fecha_original) or datetime.now().date(), key=f"rot_edit_fecha_{clave}")
+        km_actual = int(rot['kilometraje']) if pd.notna(rot['kilometraje']) else 0
+        nuevo_km = st.number_input("Kilometraje", min_value=0, value=km_actual, key=f"rot_edit_km_{clave}")
+    with col2:
+        nueva_pos_anterior = st.text_input("Posición anterior", value=rot['pos_anterior'], key=f"rot_edit_pos_ant_{clave}").strip()
+        nueva_pos_nueva = st.text_input("Posición nueva", value=rot['pos_nueva'], key=f"rot_edit_pos_nueva_{clave}").strip()
+    with col3:
+        nueva_ot = st.text_input("Orden de Trabajo", value=rot['orden_trabajo'], key=f"rot_edit_ot_{clave}")
+        nueva_planilla = st.text_input("Planilla", value=rot['planilla'], key=f"rot_edit_planilla_{clave}")
+        nuevo_operario = st.text_input("Operario", value=rot['operario'], key=f"rot_edit_operario_{clave}")
+
+    # Otras llantas montadas en el vehículo, para validar posiciones repetidas
+    otras_montadas = df_llantas[
+        (df_llantas['disponibilidad'] == 'al_piso') &
+        (df_llantas['placa_actual'].astype(str) == rot['placa_vehiculo']) &
+        (df_llantas['id_llanta'].astype(str) != rot['id_llanta'])
+    ]
+
+    def llanta_en_posicion(posicion):
+        ocupada = otras_montadas[otras_montadas['posicion_actual'].apply(normalizar_posicion) == normalizar_posicion(posicion)]
+        return None if ocupada.empty else str(ocupada.iloc[0]['id_llanta'])
+
+    sb = get_supabase_client()
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    col_btn1, col_btn2 = st.columns(2)
+
+    with col_btn1:
+        if st.button("💾 Guardar Cambios", key="guardar_rotacion", type="primary"):
+            cambia_posicion = normalizar_posicion(nueva_pos_nueva) != normalizar_posicion(rot['pos_nueva'])
+            ocupante = llanta_en_posicion(nueva_pos_nueva) if es_ultima and cambia_posicion else None
+            if not nueva_pos_nueva:
+                st.error("⚠️ La posición nueva es obligatoria")
+            elif normalizar_posicion(nueva_pos_anterior) == normalizar_posicion(nueva_pos_nueva):
+                st.error("⚠️ La posición anterior y la nueva no pueden ser iguales")
+            elif ocupante:
+                st.error(f"⚠️ La posición **{nueva_pos_nueva}** está ocupada por la llanta **{ocupante}** en el vehículo {rot['placa_vehiculo']}. Corrige primero esa llanta.")
+            else:
+                comunes = {
+                    'kilometraje': float(nuevo_km),
+                    'orden_trabajo': nueva_ot,
+                    'planilla': nueva_planilla,
+                    'operario': nuevo_operario,
+                }
+                try:
+                    if rot['id_servicio']:
+                        sb.table('servicios').update({
+                            **comunes,
+                            'fecha': formatear_fecha_como(rot['fecha'], nueva_fecha),
+                            'posicion': nueva_pos_anterior,
+                            'posicion_nueva': nueva_pos_nueva,
+                        }).eq('id_servicio', rot['id_servicio']).execute()
+                    if rot['id_movimiento']:
+                        sb.table('servicios').update({
+                            **comunes,
+                            'fecha': formatear_fecha_como(rot['fecha_mov'], nueva_fecha),
+                            'posicion': nueva_pos_nueva,
+                            'observaciones': f"Rotación: {nueva_pos_anterior} → {nueva_pos_nueva}",
+                        }).eq('id_servicio', rot['id_movimiento']).execute()
+                    if es_ultima and cambia_posicion:
+                        sb.table('llantas').update({
+                            'posicion_actual': nueva_pos_nueva,
+                            'fecha_modificacion': ahora,
+                        }).eq('id_llanta', rot['id_llanta']).execute()
+                    guardado = True
+                except Exception as e:
+                    guardado = False
+                    st.error(f"Error actualizando la rotación: {str(e)}")
+                if guardado:
+                    if nuevo_km != km_actual:
+                        actualizar_costos_km_llanta(rot['id_llanta'])
+                    st.success("✅ Rotación actualizada (servicio y movimiento)")
+                    st.rerun()
+
+    with col_btn2:
+        revertir = False
+        if es_ultima and rot['pos_anterior']:
+            ocupante_anterior = llanta_en_posicion(rot['pos_anterior'])
+            if ocupante_anterior:
+                st.caption(f"⚠️ La posición {rot['pos_anterior']} está ocupada por la llanta {ocupante_anterior}: la llanta conservará la posición {rot['pos_nueva']}.")
+            else:
+                revertir = st.checkbox(f"Devolver la llanta a la posición {rot['pos_anterior']}", value=True, key=f"rot_revertir_{clave}")
+        if st.button("🗑️ Eliminar Rotación", key="eliminar_rotacion"):
+            try:
+                for id_registro in (rot['id_servicio'], rot['id_movimiento']):
+                    if id_registro:
+                        sb.table('servicios').delete().eq('id_servicio', id_registro).execute()
+                if revertir:
+                    sb.table('llantas').update({
+                        'posicion_actual': rot['pos_anterior'],
+                        'fecha_modificacion': ahora,
+                    }).eq('id_llanta', rot['id_llanta']).execute()
+                eliminado = True
+            except Exception as e:
+                eliminado = False
+                st.error(f"Error eliminando la rotación: {str(e)}")
+            if eliminado:
+                actualizar_costos_km_llanta(rot['id_llanta'])
+                st.success("✅ Rotación eliminada (servicio y movimiento)")
+                st.rerun()
+
+def editar_alineaciones():
+    """Pestaña para editar o eliminar alineaciones"""
+    st.subheader("Gestión de Alineaciones")
+
+    df_alineaciones = leer_hoja(SHEET_ALINEACIONES)
+    if not df_alineaciones.empty:
+        df_alineaciones = filtrar_por_clientes(df_alineaciones, 'nit_cliente', obtener_clientes_accesibles())
+    if df_alineaciones.empty:
+        st.info("No hay alineaciones registradas para tus clientes")
+        return
+
+    df_alineaciones = df_alineaciones.sort_values('id_alineacion', ascending=False)
+    id_editar = st.selectbox(
+        "Seleccionar Alineación",
+        options=df_alineaciones['id_alineacion'].values,
+        format_func=lambda x: f"{x} - {df_alineaciones[df_alineaciones['id_alineacion']==x]['placa_vehiculo'].values[0]} ({df_alineaciones[df_alineaciones['id_alineacion']==x]['fecha'].values[0]})",
+        key="select_alineacion_editar"
+    )
+    alineacion = df_alineaciones[df_alineaciones['id_alineacion'] == id_editar].iloc[0]
+
+    st.info(f"**Alineación seleccionada:** {id_editar} | Placa: {alineacion.get('placa_vehiculo', 'N/A')} | Fecha: {alineacion.get('fecha', 'N/A')} | Km: {alineacion.get('kilometraje', 'N/A')}")
+
+    cambios = {}
+    col1, col2 = st.columns(2)
+    with col1:
+        fecha_original = alineacion.get('fecha', '')
+        nueva_fecha = st.date_input("Fecha", value=parsear_fecha(fecha_original) or datetime.now().date(), key=f"edit_fecha_alin_{id_editar}")
+        cambios['fecha'] = formatear_fecha_como(fecha_original, nueva_fecha)
+        km_actual = pd.to_numeric(alineacion.get('kilometraje'), errors='coerce')
+        cambios['kilometraje'] = float(st.number_input("Kilometraje", min_value=0, value=int(km_actual) if pd.notna(km_actual) else 0, key=f"edit_km_alin_{id_editar}"))
+        # Campos de texto opcionales (solo si existen en la tabla)
+        etiquetas_texto = {'orden_trabajo': "Orden de Trabajo", 'planilla': "Planilla",
+                           'operario': "Operario", 'alineador': "Alineador"}
+        for col, etiqueta in etiquetas_texto.items():
+            if col in df_alineaciones.columns:
+                cambios[col] = st.text_input(etiqueta, value=texto_limpio(alineacion.get(col)), key=f"edit_{col}_alin_{id_editar}")
+    with col2:
+        etiquetas_angulos = {'angulo_inicial_izq': "Ángulo inicial izq.", 'angulo_final_izq': "Ángulo final izq.",
+                             'angulo_inicial_der': "Ángulo inicial der.", 'angulo_final_der': "Ángulo final der."}
+        for col, etiqueta in etiquetas_angulos.items():
+            if col in df_alineaciones.columns:
+                valor = pd.to_numeric(alineacion.get(col), errors='coerce')
+                cambios[col] = st.number_input(etiqueta, value=float(valor) if pd.notna(valor) else 0.0, step=0.1, key=f"edit_{col}_alin_{id_editar}")
+        cambios['observaciones'] = st.text_area("Observaciones", value=texto_limpio(alineacion.get('observaciones')), key=f"edit_obs_alin_{id_editar}")
+
+    sb = get_supabase_client()
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("💾 Guardar Cambios", key="guardar_alineacion", type="primary"):
+            try:
+                sb.table('alineaciones').update(cambios).eq('id_alineacion', id_editar).execute()
+                guardado = True
+            except Exception as e:
+                guardado = False
+                st.error(f"Error actualizando la alineación: {str(e)}")
+            if guardado:
+                st.success("✅ Alineación actualizada con éxito")
+                st.rerun()
+    with col_btn2:
+        if st.button("🗑️ Eliminar Alineación", key="eliminar_alineacion"):
+            try:
+                sb.table('alineaciones').delete().eq('id_alineacion', id_editar).execute()
+                eliminado = True
+            except Exception as e:
+                eliminado = False
+                st.error(f"Error eliminando la alineación: {str(e)}")
+            if eliminado:
+                st.success("✅ Alineación eliminada con éxito")
+                st.rerun()
+
 def eliminar_corregir_datos():
     """Función para eliminar o corregir datos"""
     
@@ -736,7 +1112,7 @@ def eliminar_corregir_datos():
     if not verificar_permiso(2):
         return
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🚛 Vehículos", "⚙️ Llantas", "🛠️ Servicios", "👤 Clientes", "📦 Movimientos"])
+    tab1, tab2, tab3, tab_rot, tab_alin, tab4, tab5 = st.tabs(["🚛 Vehículos", "⚙️ Llantas", "🛠️ Servicios", "🔄 Rotaciones", "🔧 Alineaciones", "👤 Clientes", "📦 Movimientos"])
     
     with tab1:
         st.subheader("Gestión de Vehículos")
@@ -863,10 +1239,21 @@ def eliminar_corregir_datos():
     
     with tab3:
         st.subheader("Gestión de Servicios")
+        st.caption("Las rotaciones se editan en la pestaña 🔄 Rotaciones y los montajes/desmontajes en 📦 Movimientos.")
         df_servicios = leer_hoja(SHEET_SERVICIOS)
 
+        # Solo servicios de llantas de clientes accesibles, sin movimientos ni rotaciones
+        df_servicios_visibles = df_servicios
         if not df_servicios.empty:
-            id_servicio_editar = st.selectbox("Seleccionar Servicio", df_servicios['id_servicio'].values, key="select_servicio_editar")
+            df_llantas_srv = filtrar_por_clientes(leer_hoja(SHEET_LLANTAS), 'nit_cliente', obtener_clientes_accesibles())
+            llantas_accesibles = set(df_llantas_srv['id_llanta'].astype(str)) if not df_llantas_srv.empty else set()
+            df_servicios_visibles = df_servicios[
+                df_servicios['id_llanta'].astype(str).isin(llantas_accesibles) &
+                ~df_servicios['tipo_servicio'].isin(TIPOS_MOVIMIENTO)
+            ]
+
+        if not df_servicios_visibles.empty:
+            id_servicio_editar = st.selectbox("Seleccionar Servicio", df_servicios_visibles['id_servicio'].values, key="select_servicio_editar")
 
             servicio = df_servicios[df_servicios['id_servicio'] == id_servicio_editar].iloc[0]
 
@@ -877,10 +1264,7 @@ def eliminar_corregir_datos():
             with col1:
                 # Fecha del servicio
                 fecha_actual = servicio.get('fecha', '')
-                try:
-                    fecha_parsed = datetime.strptime(str(fecha_actual), "%d/%m/%Y").date() if fecha_actual else datetime.now().date()
-                except:
-                    fecha_parsed = datetime.now().date()
+                fecha_parsed = parsear_fecha(fecha_actual) or datetime.now().date()
                 nueva_fecha = st.date_input("Fecha", value=fecha_parsed, key=f"edit_fecha_servicio_{id_servicio_editar}")
 
                 # Kilometraje
@@ -914,7 +1298,7 @@ def eliminar_corregir_datos():
             with col_btn1:
                 if st.button("💾 Guardar Cambios", key="guardar_servicio", type="primary"):
                     # Actualizar los campos editables
-                    df_servicios.loc[df_servicios['id_servicio'] == id_servicio_editar, 'fecha'] = nueva_fecha.strftime("%d/%m/%Y")
+                    df_servicios.loc[df_servicios['id_servicio'] == id_servicio_editar, 'fecha'] = formatear_fecha_como(fecha_actual, nueva_fecha)
                     df_servicios.loc[df_servicios['id_servicio'] == id_servicio_editar, 'kilometraje'] = nuevo_km
                     df_servicios.loc[df_servicios['id_servicio'] == id_servicio_editar, 'profundidad_1'] = nueva_prof1
                     df_servicios.loc[df_servicios['id_servicio'] == id_servicio_editar, 'profundidad_2'] = nueva_prof2
@@ -947,18 +1331,22 @@ def eliminar_corregir_datos():
             st.divider()
             st.caption(f"ID Llanta: {servicio.get('id_llanta', 'N/A')} | Placa: {servicio.get('placa_vehiculo', 'N/A')} | Posición original: {servicio.get('posicion', 'N/A')} | Vida: {servicio.get('vida', 'N/A')}")
         else:
-            st.info("No hay servicios registrados")
+            st.info("No hay servicios registrados para tus clientes")
+
+    with tab_rot:
+        editar_rotaciones()
+
+    with tab_alin:
+        editar_alineaciones()
     
     with tab4:
         st.subheader("Gestión de Clientes")
         
+        df_clientes = leer_hoja(SHEET_CLIENTES)
+
         if st.session_state.get('nivel') != 1:
             st.warning("⚠️ Solo el Administrador puede editar clientes")
-            return
-        
-        df_clientes = leer_hoja(SHEET_CLIENTES)
-        
-        if not df_clientes.empty:
+        elif not df_clientes.empty:
             nit_editar = st.selectbox("Seleccionar Cliente", df_clientes['nit'].values, key="select_cliente_editar")
             
             cliente = df_clientes[df_clientes['nit'] == nit_editar].iloc[0]
@@ -983,8 +1371,11 @@ def eliminar_corregir_datos():
 
     with tab5:
         st.subheader("Gestión de Movimientos")
+        st.caption("Las rotaciones se editan en la pestaña 🔄 Rotaciones, que actualiza el servicio y el movimiento juntos.")
 
         df_movimientos = leer_hoja(SHEET_MOVIMIENTOS)
+        if not df_movimientos.empty and 'tipo' in df_movimientos.columns:
+            df_movimientos = df_movimientos[df_movimientos['tipo'] != 'rotacion']
 
         if not df_movimientos.empty:
             # Filtrar por clientes accesibles
@@ -1010,9 +1401,9 @@ def eliminar_corregir_datos():
 
                 with col1:
                     # Tipo de movimiento
-                    tipos_mov = ['montaje', 'desmontaje', 'aprobacion_reencauche', 'rotacion', 'otro']
+                    tipos_mov = ['montaje', 'desmontaje', 'aprobacion_reencauche', 'otro']
                     tipo_actual = movimiento.get('tipo', 'otro')
-                    tipo_idx = tipos_mov.index(tipo_actual) if tipo_actual in tipos_mov else 4
+                    tipo_idx = tipos_mov.index(tipo_actual) if tipo_actual in tipos_mov else tipos_mov.index('otro')
                     nuevo_tipo = st.selectbox("Tipo", options=tipos_mov, index=tipo_idx, key=f"edit_tipo_mov_{id_mov_editar}")
 
                     # Vida
@@ -1055,7 +1446,7 @@ def eliminar_corregir_datos():
                     nueva_ref_reenc = st.text_input("Ref. Reencauche", value=ref_reenc, key=f"edit_ref_reenc_{id_mov_editar}")
 
                 with col6:
-                    precio_reenc = float(movimiento.get('precio_reencauche', 0)) if pd.notna(movimiento.get('precio_reencauche')) else 0
+                    precio_reenc = float(movimiento.get('precio_reencauche', 0)) if pd.notna(movimiento.get('precio_reencauche')) else 0.0
                     nuevo_precio_reenc = st.number_input("Precio Reencauche", min_value=0.0, value=precio_reenc, key=f"edit_precio_reenc_{id_mov_editar}")
 
                 # Observaciones
@@ -1389,48 +1780,149 @@ def ver_llantas_disponibles():
         if st.session_state.get('nivel', 99) != 1:
             st.warning("⚠️ Solo el administrador puede asignar precios")
         else:
-            st.info("Edita los precios directamente en la tabla y presiona **Guardar Cambios**.")
+            cols_precio_vida = ['precio_vida1', 'precio_vida2', 'precio_vida3', 'precio_vida4']
 
-            cols_precio = ['id_llanta', 'nit_cliente', 'marca_llanta', 'referencia', 'dimension',
-                           'precio_vida1', 'precio_vida2', 'precio_vida3', 'precio_vida4']
-            cols_disponibles = [c for c in cols_precio if c in df_llantas.columns]
-            df_precios = df_llantas[cols_disponibles].copy()
+            # ---------- ASIGNACIÓN MASIVA ----------
+            st.write("### Asignación masiva")
+            st.caption("Filtra las llantas, marca las que quieras y aplica el mismo precio a todas.")
 
-            for col in ['precio_vida1', 'precio_vida2', 'precio_vida3', 'precio_vida4']:
-                if col in df_precios.columns:
-                    df_precios[col] = pd.to_numeric(df_precios[col], errors='coerce').fillna(0)
+            df_clientes_p = filtrar_por_clientes(leer_hoja(SHEET_CLIENTES), 'nit', clientes_acceso)
+            nombres_clientes = dict(zip(df_clientes_p['nit'], df_clientes_p['nombre_cliente'])) if not df_clientes_p.empty else {}
 
-            column_config = {
-                'id_llanta':    st.column_config.TextColumn("ID Llanta",   disabled=True),
-                'nit_cliente':  st.column_config.TextColumn("NIT Cliente", disabled=True),
-                'marca_llanta': st.column_config.TextColumn("Marca",       disabled=True),
-                'referencia':   st.column_config.TextColumn("Referencia",  disabled=True),
-                'dimension':    st.column_config.TextColumn("Dimensión",   disabled=True),
-                'precio_vida1': st.column_config.NumberColumn("Precio Vida 1", min_value=0, format="$ %d"),
-                'precio_vida2': st.column_config.NumberColumn("Precio Vida 2", min_value=0, format="$ %d"),
-                'precio_vida3': st.column_config.NumberColumn("Precio Vida 3", min_value=0, format="$ %d"),
-                'precio_vida4': st.column_config.NumberColumn("Precio Vida 4", min_value=0, format="$ %d"),
-            }
+            def opciones_de(df, col):
+                return ['Todas'] + sorted(df[col].dropna().astype(str).unique()) if col in df.columns else ['Todas']
 
-            edited_df = st.data_editor(
-                df_precios,
-                column_config=column_config,
-                hide_index=True,
-                use_container_width=True,
-                key="editor_precios"
-            )
+            col_f1, col_f2, col_f3 = st.columns(3)
+            with col_f1:
+                filtro_cliente_p = st.selectbox("Cliente", options=['Todos'] + list(nombres_clientes.keys()),
+                                                format_func=lambda x: nombres_clientes.get(x, x), key="precio_filtro_cliente")
+                df_masivo = df_llantas if filtro_cliente_p == 'Todos' else df_llantas[df_llantas['nit_cliente'] == filtro_cliente_p]
+                filtro_marca_p = st.selectbox("Marca", options=opciones_de(df_masivo, 'marca_llanta'), key="precio_filtro_marca")
+            if filtro_marca_p != 'Todas':
+                df_masivo = df_masivo[df_masivo['marca_llanta'].astype(str) == filtro_marca_p]
+            with col_f2:
+                filtro_ref_p = st.selectbox("Referencia", options=opciones_de(df_masivo, 'referencia'), key="precio_filtro_ref")
+                if filtro_ref_p != 'Todas':
+                    df_masivo = df_masivo[df_masivo['referencia'].astype(str) == filtro_ref_p]
+                filtro_dim_p = st.selectbox("Dimensión", options=opciones_de(df_masivo, 'dimension'), key="precio_filtro_dim")
+                if filtro_dim_p != 'Todas':
+                    df_masivo = df_masivo[df_masivo['dimension'].astype(str) == filtro_dim_p]
+            with col_f3:
+                filtro_vida_p = st.selectbox("Vida actual", options=opciones_de(df_masivo, 'vida_actual'), key="precio_filtro_vida")
+                if filtro_vida_p != 'Todas':
+                    df_masivo = df_masivo[df_masivo['vida_actual'].astype(str) == filtro_vida_p]
+                filtro_disp_p = st.selectbox("Disponibilidad", options=opciones_de(df_masivo, 'disponibilidad'), key="precio_filtro_disp")
+                if filtro_disp_p != 'Todas':
+                    df_masivo = df_masivo[df_masivo['disponibilidad'].astype(str) == filtro_disp_p]
 
-            if st.button("💾 Guardar Cambios de Precios", type="primary"):
-                df_todos = leer_hoja_fresco(SHEET_LLANTAS)
-                for _, row in edited_df.iterrows():
-                    id_llanta = row['id_llanta']
-                    for col in ['precio_vida1', 'precio_vida2', 'precio_vida3', 'precio_vida4']:
-                        if col in edited_df.columns:
-                            df_todos.loc[df_todos['id_llanta'] == id_llanta, col] = row[col]
-                df_todos['fecha_modificacion'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                escribir_hoja(SHEET_LLANTAS, df_todos)
-                st.success("✅ Precios actualizados exitosamente")
-                st.rerun()
+            col_p1, col_p2 = st.columns(2)
+            with col_p1:
+                vida_precio = st.selectbox("Vida a la que aplica el precio", options=[1, 2, 3, 4],
+                                           format_func=lambda v: f"Vida {v}", key="precio_masivo_vida")
+            with col_p2:
+                precio_masivo = st.number_input("💰 Precio", min_value=0.0, value=0.0, step=10000.0, key="precio_masivo_valor")
+
+            if df_masivo.empty:
+                st.info("No hay llantas que cumplan los filtros")
+            else:
+                # La clave depende de los filtros para que la selección se reinicie al cambiarlos
+                clave_filtros = f"{filtro_cliente_p}_{filtro_marca_p}_{filtro_ref_p}_{filtro_dim_p}_{filtro_vida_p}_{filtro_disp_p}"
+                seleccionar_todas = st.checkbox(f"Seleccionar las {len(df_masivo)} llantas filtradas", key=f"precio_sel_todas_{clave_filtros}")
+
+                col_precio_sel = f'precio_vida{vida_precio}'
+                cols_vista = [c for c in ['id_llanta', 'marca_llanta', 'referencia', 'dimension', 'vida_actual', col_precio_sel] if c in df_masivo.columns]
+                df_vista = df_masivo[cols_vista].copy()
+                df_vista.insert(0, 'seleccionar', seleccionar_todas)
+
+                df_seleccion = st.data_editor(
+                    df_vista,
+                    column_config={
+                        'seleccionar':  st.column_config.CheckboxColumn("✔", default=False),
+                        'id_llanta':    st.column_config.TextColumn("ID Llanta"),
+                        'marca_llanta': st.column_config.TextColumn("Marca"),
+                        'referencia':   st.column_config.TextColumn("Referencia"),
+                        'dimension':    st.column_config.TextColumn("Dimensión"),
+                        'vida_actual':  st.column_config.NumberColumn("Vida actual"),
+                        col_precio_sel: st.column_config.NumberColumn(f"Precio actual vida {vida_precio}", format="$ %d"),
+                    },
+                    disabled=[c for c in cols_vista],
+                    hide_index=True,
+                    use_container_width=True,
+                    key=f"precio_masivo_tabla_{clave_filtros}_{vida_precio}_{seleccionar_todas}"
+                )
+                ids_seleccionados = df_seleccion.loc[df_seleccion['seleccionar'], 'id_llanta'].astype(str).tolist()
+
+                col_btn1, col_btn2 = st.columns([1, 3])
+                with col_btn1:
+                    aplicar_btn = st.button("✅ Aplicar a seleccionadas", type="primary",
+                                            disabled=len(ids_seleccionados) == 0, key="precio_masivo_aplicar")
+                with col_btn2:
+                    if ids_seleccionados:
+                        st.write(f"Se asignará **${precio_masivo:,.0f}** como precio de **vida {vida_precio}** a **{len(ids_seleccionados)}** llantas")
+
+                if aplicar_btn:
+                    if precio_masivo <= 0:
+                        st.error("⚠️ Debes ingresar un precio mayor a cero")
+                    else:
+                        df_todos = leer_hoja_fresco(SHEET_LLANTAS)
+                        mascara = df_todos['id_llanta'].astype(str).isin(ids_seleccionados)
+                        df_todos.loc[mascara, col_precio_sel] = precio_masivo
+                        df_todos.loc[mascara, 'fecha_modificacion'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        df_todos = recalcular_costos_km_lote(df_todos, leer_hoja(SHEET_SERVICIOS), ids_seleccionados)
+                        escribir_hoja(SHEET_LLANTAS, df_todos)
+                        st.success(f"✅ Precio vida {vida_precio} de ${precio_masivo:,.0f} asignado a {len(ids_seleccionados)} llantas")
+                        st.rerun()
+
+            # ---------- EDICIÓN INDIVIDUAL ----------
+            st.divider()
+            with st.expander("✏️ Editar precios llanta por llanta"):
+                st.info("Edita los precios directamente en la tabla y presiona **Guardar Cambios**.")
+
+                cols_precio = ['id_llanta', 'nit_cliente', 'marca_llanta', 'referencia', 'dimension'] + cols_precio_vida
+                cols_disponibles = [c for c in cols_precio if c in df_llantas.columns]
+                df_precios = df_llantas[cols_disponibles].copy()
+
+                for col in cols_precio_vida:
+                    if col in df_precios.columns:
+                        df_precios[col] = pd.to_numeric(df_precios[col], errors='coerce').fillna(0)
+
+                column_config = {
+                    'id_llanta':    st.column_config.TextColumn("ID Llanta",   disabled=True),
+                    'nit_cliente':  st.column_config.TextColumn("NIT Cliente", disabled=True),
+                    'marca_llanta': st.column_config.TextColumn("Marca",       disabled=True),
+                    'referencia':   st.column_config.TextColumn("Referencia",  disabled=True),
+                    'dimension':    st.column_config.TextColumn("Dimensión",   disabled=True),
+                    'precio_vida1': st.column_config.NumberColumn("Precio Vida 1", min_value=0, format="$ %d"),
+                    'precio_vida2': st.column_config.NumberColumn("Precio Vida 2", min_value=0, format="$ %d"),
+                    'precio_vida3': st.column_config.NumberColumn("Precio Vida 3", min_value=0, format="$ %d"),
+                    'precio_vida4': st.column_config.NumberColumn("Precio Vida 4", min_value=0, format="$ %d"),
+                }
+
+                edited_df = st.data_editor(
+                    df_precios,
+                    column_config=column_config,
+                    hide_index=True,
+                    use_container_width=True,
+                    key="editor_precios"
+                )
+
+                if st.button("💾 Guardar Cambios de Precios", type="primary"):
+                    # Solo las llantas cuyo precio cambió
+                    cols_editables = [c for c in cols_precio_vida if c in edited_df.columns]
+                    cambiadas = edited_df[(edited_df[cols_editables] != df_precios[cols_editables]).any(axis=1)]
+                    if cambiadas.empty:
+                        st.info("No hay cambios de precio para guardar")
+                    else:
+                        df_todos = leer_hoja_fresco(SHEET_LLANTAS)
+                        for _, row in cambiadas.iterrows():
+                            mascara = df_todos['id_llanta'] == row['id_llanta']
+                            for col in cols_editables:
+                                df_todos.loc[mascara, col] = row[col]
+                            df_todos.loc[mascara, 'fecha_modificacion'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        df_todos = recalcular_costos_km_lote(df_todos, leer_hoja(SHEET_SERVICIOS), cambiadas['id_llanta'].astype(str).tolist())
+                        escribir_hoja(SHEET_LLANTAS, df_todos)
+                        st.success(f"✅ Precios actualizados en {len(cambiadas)} llantas")
+                        st.rerun()
 
 # Continuará en la siguiente parte debido a límite de caracteres...
 
@@ -2963,13 +3455,18 @@ def rotacion_completa():
 
             escribir_hoja(SHEET_LLANTAS, df_llantas_update)
 
-            # Crear un registro de servicio por cada llanta rotada
+            # Crear un registro de servicio por cada llanta rotada.
+            # El consecutivo se calcula sobre df_servicios (que ya incluye las filas nuevas)
+            # para que cada llanta reciba un ID distinto.
+            prefijo_servicio = obtener_id_cliente(nit_cliente) + '_S'
             for ll_rot in llantas_rotadas:
-                id_servicio = generar_id_servicio(nit_cliente)
+                consecutivo = _max_consecutivo_por_prefijo(df_servicios, 'id_servicio', prefijo_servicio) + 1
+                id_servicio = f"{prefijo_servicio}{consecutivo:04d}"
 
                 # Obtener vida actual
                 llanta_row = df_llantas_update[df_llantas_update['id_llanta'].astype(str) == ll_rot['id_llanta']]
                 vida = int(llanta_row['vida_actual'].values[0]) if not llanta_row.empty and 'vida_actual' in llanta_row.columns and pd.notna(llanta_row['vida_actual'].values[0]) else 1
+                ll_rot['vida'] = vida
 
                 nuevo_servicio = pd.DataFrame([{
                     'id_servicio': id_servicio,
@@ -3011,7 +3508,7 @@ def rotacion_completa():
                 crear_movimiento(
                     id_llanta=ll_rot['id_llanta'],
                     tipo='rotacion',
-                    vida=1,
+                    vida=ll_rot['vida'],
                     placa_vehiculo=placa_vehiculo,
                     posicion=ll_rot['pos_nueva'],
                     kilometraje=kilometraje,

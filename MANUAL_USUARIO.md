@@ -114,6 +114,9 @@ Ingrese a **Estado de Llantas** y utilice las siguientes pestañas:
 - **Aprobar Reencauches:** seleccione las llantas autorizadas e ingrese marca, referencia y precio del reencauche.
 - **Análisis de Costos:** consulte y recalcule el costo por kilómetro de una llanta.
 - **Asignación de Precios:** registre o actualice los precios por vida de la llanta.
+  - **Asignación masiva:** filtre por cliente, marca, referencia, dimensión, vida actual o disponibilidad; elija la vida y el precio; marque las llantas (o use **Seleccionar las llantas filtradas**) y pulse **Aplicar a seleccionadas**.
+  - **Editar precios llanta por llanta:** despliegue esta sección para cambiar precios individuales en la tabla.
+  - Al guardar, los costos/km de las llantas modificadas se recalculan automáticamente.
 
 Las opciones de aprobación de reencauches y asignación de precios requieren permisos de administrador.
 
@@ -207,15 +210,29 @@ Los usuarios autorizados pueden ingresar a **Editar/Eliminar Datos** y seleccion
 
 - **Vehículos**
 - **Llantas**
-- **Servicios**
+- **Servicios** (solo servicios de mantenimiento; las rotaciones y movimientos se editan en sus pestañas)
+- **Rotaciones**
+- **Alineaciones**
 - **Clientes**
-- **Movimientos**
+- **Movimientos** (montajes, desmontajes y aprobaciones de reencauche)
 
 Seleccione el registro, modifique los campos necesarios y pulse **Guardar Cambios**. Para eliminarlo, pulse **Eliminar** y confirme la operación cuando el sistema lo solicite.
 
 La eliminación puede afectar historiales y relaciones entre registros. Antes de eliminar información, confirme que seleccionó el registro correcto. Prefiera corregir el registro cuando sea posible.
 
 Los movimientos se generan automáticamente al montar, desmontar, rotar o aprobar el reencauche de una llanta; no se crean desde un formulario independiente.
+
+### Editar o eliminar una rotación
+
+Cada rotación de una llanta guarda un servicio y un movimiento. En la pestaña **Rotaciones** se editan los dos a la vez:
+
+1. Filtre por vehículo o llanta y seleccione la rotación.
+2. Corrija la fecha, el kilometraje, la posición anterior, la posición nueva, la orden de trabajo, la planilla o el operario.
+3. Pulse **Guardar Cambios**.
+
+Si es la rotación más reciente de la llanta, al cambiar la posición nueva también se actualiza la posición actual de la llanta. El sistema no permite asignar una posición ocupada por otra llanta del mismo vehículo.
+
+Al eliminar una rotación se borran el servicio y el movimiento. Si es la más reciente de la llanta y la posición anterior está libre, puede marcar **Devolver la llanta a la posición…** para dejarla donde estaba.
 
 ## 11. Carga de archivos CSV
 
