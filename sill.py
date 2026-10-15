@@ -531,6 +531,48 @@ def obtener_clientes_accesibles():
 
     return []
 
+# ============= AVISOS Y FILTRO DE CLIENTE =============
+def avisar_y_recargar(clave, mensaje, limpiar=()):
+    """
+    Guarda un aviso de éxito para mostrarlo después de recargar la página
+    (st.rerun borra los mensajes) y limpia los campos indicados del formulario.
+    """
+    st.session_state[f'_aviso_{clave}'] = mensaje
+    for key in limpiar:
+        st.session_state.pop(key, None)
+    st.rerun()
+
+def mostrar_aviso(clave):
+    """Muestra el aviso guardado por avisar_y_recargar, si existe"""
+    mensaje = st.session_state.pop(f'_aviso_{clave}', None)
+    if mensaje:
+        st.success(mensaje)
+        st.toast(mensaje.split('\n')[0])
+
+def selector_cliente(key, label="👥 Cliente"):
+    """
+    Selector de cliente con opción 'Todos'. Retorna el NIT elegido o None (todos).
+    Si el usuario tiene un solo cliente no muestra nada y retorna ese cliente.
+    """
+    clientes_acceso = obtener_clientes_accesibles()
+    if len(clientes_acceso) <= 1:
+        return clientes_acceso[0] if clientes_acceso else None
+    df_clientes = filtrar_por_clientes(leer_hoja(SHEET_CLIENTES), 'nit', clientes_acceso)
+    nombres = dict(zip(df_clientes['nit'], df_clientes['nombre_cliente'])) if not df_clientes.empty else {}
+    opciones = ['Todos'] + sorted(nombres.keys(), key=lambda n: str(nombres.get(n, n)))
+    seleccion = st.selectbox(label, options=opciones, format_func=lambda x: 'Todos' if x == 'Todos' else nombres.get(x, x), key=key)
+    return None if seleccion == 'Todos' else seleccion
+
+def filtrar_cliente(df, columna_nit, nit_cliente):
+    """Filtra un DataFrame por un cliente; si nit_cliente es None no filtra"""
+    if nit_cliente is None or df.empty or columna_nit not in df.columns:
+        return df
+    return df[df[columna_nit].astype(str).str.strip() == str(nit_cliente).strip()]
+
+def cliente_servicios():
+    """Cliente elegido en el selector de la pantalla Servicios (None = todos)"""
+    return st.session_state.get('_srv_cliente_nit')
+
 def obtener_operarios_cliente(nit_cliente):
     """Retorna lista de operarios (usuarios nivel 3) asignados a un cliente específico"""
     df_usuarios = leer_hoja(SHEET_USUARIOS)
@@ -742,6 +784,8 @@ def subir_datos_csv():
 
     if not verificar_permiso(1):  # Solo Administrador puede subir CSV
         return
+
+    mostrar_aviso('csv')
     
     st.subheader("Selecciona qué datos deseas cargar")
     
@@ -784,8 +828,7 @@ def subir_datos_csv():
                         df_combinado = pd.concat([df_existente, df_nuevo], ignore_index=True)
                         escribir_hoja(SHEET_MOVIMIENTOS, df_combinado)
 
-                    st.success(f"✅ Datos de {tipo_dato} agregados exitosamente")
-                    st.rerun()
+                    avisar_y_recargar('csv', f"✅ Datos de {tipo_dato} agregados exitosamente")
             
             with col2:
                 if st.button("❌ Cancelar"):
@@ -879,9 +922,12 @@ def obtener_rotaciones(df_servicios):
 def editar_rotaciones():
     """Pestaña para editar o eliminar la rotación de una llanta (servicio + movimiento)"""
     st.subheader("Gestión de Rotaciones")
+    mostrar_aviso('ed_rotacion')
+    cliente_filtro = selector_cliente("ed_filtro_cliente_rot")
     st.caption("Cada cambio se aplica al servicio y al movimiento de la rotación de la llanta seleccionada.")
 
     df_llantas = filtrar_por_clientes(leer_hoja(SHEET_LLANTAS), 'nit_cliente', obtener_clientes_accesibles())
+    df_llantas = filtrar_cliente(df_llantas, 'nit_cliente', cliente_filtro)
     llantas_accesibles = set(df_llantas['id_llanta'].astype(str)) if not df_llantas.empty else set()
 
     todas_rotaciones = [r for r in obtener_rotaciones(leer_hoja(SHEET_SERVICIOS)) if r['id_llanta'] in llantas_accesibles]
@@ -1003,8 +1049,7 @@ def editar_rotaciones():
                 if guardado:
                     if nuevo_km != km_actual:
                         actualizar_costos_km_llanta(rot['id_llanta'])
-                    st.success("✅ Rotación actualizada (servicio y movimiento)")
-                    st.rerun()
+                    avisar_y_recargar('ed_rotacion', "✅ Rotación actualizada (servicio y movimiento)")
 
     with col_btn2:
         revertir = False
@@ -1030,16 +1075,18 @@ def editar_rotaciones():
                 st.error(f"Error eliminando la rotación: {str(e)}")
             if eliminado:
                 actualizar_costos_km_llanta(rot['id_llanta'])
-                st.success("✅ Rotación eliminada (servicio y movimiento)")
-                st.rerun()
+                avisar_y_recargar('ed_rotacion', "✅ Rotación eliminada (servicio y movimiento)")
 
 def editar_alineaciones():
     """Pestaña para editar o eliminar alineaciones"""
     st.subheader("Gestión de Alineaciones")
+    mostrar_aviso('ed_alineacion')
+    cliente_filtro = selector_cliente("ed_filtro_cliente_alin")
 
     df_alineaciones = leer_hoja(SHEET_ALINEACIONES)
     if not df_alineaciones.empty:
         df_alineaciones = filtrar_por_clientes(df_alineaciones, 'nit_cliente', obtener_clientes_accesibles())
+        df_alineaciones = filtrar_cliente(df_alineaciones, 'nit_cliente', cliente_filtro)
     if df_alineaciones.empty:
         st.info("No hay alineaciones registradas para tus clientes")
         return
@@ -1089,8 +1136,7 @@ def editar_alineaciones():
                 guardado = False
                 st.error(f"Error actualizando la alineación: {str(e)}")
             if guardado:
-                st.success("✅ Alineación actualizada con éxito")
-                st.rerun()
+                avisar_y_recargar('ed_alineacion', "✅ Alineación actualizada con éxito")
     with col_btn2:
         if st.button("🗑️ Eliminar Alineación", key="eliminar_alineacion"):
             try:
@@ -1100,8 +1146,7 @@ def editar_alineaciones():
                 eliminado = False
                 st.error(f"Error eliminando la alineación: {str(e)}")
             if eliminado:
-                st.success("✅ Alineación eliminada con éxito")
-                st.rerun()
+                avisar_y_recargar('ed_alineacion', "✅ Alineación eliminada con éxito")
 
 def eliminar_corregir_datos():
     """Función para eliminar o corregir datos"""
@@ -1116,11 +1161,14 @@ def eliminar_corregir_datos():
     
     with tab1:
         st.subheader("Gestión de Vehículos")
+        mostrar_aviso('ed_vehiculo')
+        cliente_filtro = selector_cliente("ed_filtro_cliente_veh")
         df_vehiculos = leer_hoja(SHEET_VEHICULOS)
         
         if not df_vehiculos.empty:
             clientes_acceso = obtener_clientes_accesibles()
             df_vehiculos = filtrar_por_clientes(df_vehiculos, 'nit_cliente', clientes_acceso)
+            df_vehiculos = filtrar_cliente(df_vehiculos, 'nit_cliente', cliente_filtro)
             
             if not df_vehiculos.empty:
                 id_editar = st.selectbox("Seleccionar Vehículo",
@@ -1162,16 +1210,14 @@ def eliminar_corregir_datos():
                         df_todos.loc[df_todos['id_vehiculo'] == id_editar, 'kilometraje_inicial'] = nuevo_km_inicial
                         df_todos.loc[df_todos['id_vehiculo'] == id_editar, 'calculo_kms'] = nuevo_calculo
                         escribir_hoja(SHEET_VEHICULOS, df_todos)
-                        st.success("✅ Vehículo actualizado con éxito")
-                        st.rerun()
+                        avisar_y_recargar('ed_vehiculo', "✅ Vehículo actualizado con éxito")
                 
                 with col_btn2:
                     if st.button("🗑️ Eliminar Vehículo", key="eliminar_vehiculo"):
                         df_todos = leer_hoja(SHEET_VEHICULOS)
                         df_todos = df_todos[df_todos['id_vehiculo'] != id_editar]
                         escribir_hoja(SHEET_VEHICULOS, df_todos)
-                        st.success("✅ Vehículo eliminado con éxito")
-                        st.rerun()
+                        avisar_y_recargar('ed_vehiculo', "✅ Vehículo eliminado con éxito")
             else:
                 st.info("No tienes vehículos accesibles")
         else:
@@ -1179,11 +1225,14 @@ def eliminar_corregir_datos():
     
     with tab2:
         st.subheader("Gestión de Llantas")
+        mostrar_aviso('ed_llanta')
+        cliente_filtro = selector_cliente("ed_filtro_cliente_llanta")
         df_llantas = leer_hoja(SHEET_LLANTAS)
         
         if not df_llantas.empty:
             clientes_acceso = obtener_clientes_accesibles()
             df_llantas = filtrar_por_clientes(df_llantas, 'nit_cliente', clientes_acceso)
+            df_llantas = filtrar_cliente(df_llantas, 'nit_cliente', cliente_filtro)
             
             if not df_llantas.empty:
                 id_editar = st.selectbox("Seleccionar Llanta", df_llantas['id_llanta'].values, key="select_llanta_editar")
@@ -1223,15 +1272,13 @@ def eliminar_corregir_datos():
                     # Recalcular costos/km después de guardar
                     actualizar_costos_km_llanta(id_editar)
                     
-                    st.success("✅ Llanta actualizada con éxito")
-                    st.rerun()
+                    avisar_y_recargar('ed_llanta', "✅ Llanta actualizada con éxito")
                 
                 if st.button("🗑️ Eliminar Llanta", key="eliminar_llanta"):
                     df_todos = leer_hoja(SHEET_LLANTAS)
                     df_todos = df_todos[df_todos['id_llanta'] != id_editar]
                     escribir_hoja(SHEET_LLANTAS, df_todos)
-                    st.success("✅ Llanta eliminada con éxito")
-                    st.rerun()
+                    avisar_y_recargar('ed_llanta', "✅ Llanta eliminada con éxito")
             else:
                 st.info("No tienes llantas accesibles")
         else:
@@ -1239,6 +1286,8 @@ def eliminar_corregir_datos():
     
     with tab3:
         st.subheader("Gestión de Servicios")
+        mostrar_aviso('ed_servicio')
+        cliente_filtro = selector_cliente("ed_filtro_cliente_srv")
         st.caption("Las rotaciones se editan en la pestaña 🔄 Rotaciones y los montajes/desmontajes en 📦 Movimientos.")
         df_servicios = leer_hoja(SHEET_SERVICIOS)
 
@@ -1246,6 +1295,7 @@ def eliminar_corregir_datos():
         df_servicios_visibles = df_servicios
         if not df_servicios.empty:
             df_llantas_srv = filtrar_por_clientes(leer_hoja(SHEET_LLANTAS), 'nit_cliente', obtener_clientes_accesibles())
+            df_llantas_srv = filtrar_cliente(df_llantas_srv, 'nit_cliente', cliente_filtro)
             llantas_accesibles = set(df_llantas_srv['id_llanta'].astype(str)) if not df_llantas_srv.empty else set()
             df_servicios_visibles = df_servicios[
                 df_servicios['id_llanta'].astype(str).isin(llantas_accesibles) &
@@ -1317,15 +1367,13 @@ def eliminar_corregir_datos():
                     if id_llanta_servicio:
                         actualizar_costos_km_llanta(id_llanta_servicio)
 
-                    st.success("✅ Servicio actualizado con éxito")
-                    st.rerun()
+                    avisar_y_recargar('ed_servicio', "✅ Servicio actualizado con éxito")
 
             with col_btn2:
                 if st.button("🗑️ Eliminar Servicio", key="eliminar_servicio"):
                     df_servicios = df_servicios[df_servicios['id_servicio'] != id_servicio_editar]
                     escribir_hoja(SHEET_SERVICIOS, df_servicios)
-                    st.success("✅ Servicio eliminado con éxito")
-                    st.rerun()
+                    avisar_y_recargar('ed_servicio', "✅ Servicio eliminado con éxito")
 
             # Mostrar información de referencia
             st.divider()
@@ -1341,6 +1389,7 @@ def eliminar_corregir_datos():
     
     with tab4:
         st.subheader("Gestión de Clientes")
+        mostrar_aviso('ed_cliente')
         
         df_clientes = leer_hoja(SHEET_CLIENTES)
 
@@ -1358,19 +1407,19 @@ def eliminar_corregir_datos():
             if st.button("💾 Guardar Cambios", key="guardar_cliente"):
                 df_clientes.loc[df_clientes['nit'] == nit_editar, 'nombre_cliente'] = nuevo_nombre
                 escribir_hoja(SHEET_CLIENTES, df_clientes)
-                st.success("✅ Cliente actualizado con éxito")
-                st.rerun()
+                avisar_y_recargar('ed_cliente', "✅ Cliente actualizado con éxito")
             
             if st.button("🗑️ Eliminar Cliente", key="eliminar_cliente"):
                 df_clientes = df_clientes[df_clientes['nit'] != nit_editar]
                 escribir_hoja(SHEET_CLIENTES, df_clientes)
-                st.success("✅ Cliente eliminado con éxito")
-                st.rerun()
+                avisar_y_recargar('ed_cliente', "✅ Cliente eliminado con éxito")
         else:
             st.info("No hay clientes registrados")
 
     with tab5:
         st.subheader("Gestión de Movimientos")
+        mostrar_aviso('ed_movimiento')
+        cliente_filtro = selector_cliente("ed_filtro_cliente_mov")
         st.caption("Las rotaciones se editan en la pestaña 🔄 Rotaciones, que actualiza el servicio y el movimiento juntos.")
 
         df_movimientos = leer_hoja(SHEET_MOVIMIENTOS)
@@ -1384,6 +1433,9 @@ def eliminar_corregir_datos():
                 df_llantas_temp = leer_hoja(SHEET_LLANTAS)
                 llantas_cliente = df_llantas_temp[df_llantas_temp['nit_cliente'].isin(clientes_acceso)]['id_llanta'].tolist()
                 df_movimientos = df_movimientos[df_movimientos['id_llanta'].isin(llantas_cliente)]
+            if cliente_filtro is not None:
+                llantas_filtro = filtrar_cliente(leer_hoja(SHEET_LLANTAS), 'nit_cliente', cliente_filtro)['id_llanta'].tolist()
+                df_movimientos = df_movimientos[df_movimientos['id_llanta'].isin(llantas_filtro)]
 
             if not df_movimientos.empty:
                 id_mov_editar = st.selectbox(
@@ -1469,16 +1521,14 @@ def eliminar_corregir_datos():
                         df_mov_todos.loc[df_mov_todos['id_movimiento'] == id_mov_editar, 'precio_reencauche'] = nuevo_precio_reenc
                         df_mov_todos.loc[df_mov_todos['id_movimiento'] == id_mov_editar, 'observaciones'] = nuevas_obs
                         escribir_hoja(SHEET_MOVIMIENTOS, df_mov_todos)
-                        st.success("✅ Movimiento actualizado con éxito")
-                        st.rerun()
+                        avisar_y_recargar('ed_movimiento', "✅ Movimiento actualizado con éxito")
 
                 with col_btn2:
                     if st.button("🗑️ Eliminar Movimiento", key="eliminar_movimiento"):
                         df_mov_todos = leer_hoja(SHEET_MOVIMIENTOS)
                         df_mov_todos = df_mov_todos[df_mov_todos['id_movimiento'] != id_mov_editar]
                         escribir_hoja(SHEET_MOVIMIENTOS, df_mov_todos)
-                        st.success("✅ Movimiento eliminado con éxito")
-                        st.rerun()
+                        avisar_y_recargar('ed_movimiento', "✅ Movimiento eliminado con éxito")
 
                 # Mostrar información de referencia
                 st.divider()
@@ -1584,6 +1634,7 @@ def ver_llantas_disponibles():
     
     with tab2:
         st.subheader("✅ Aprobar Reencauches")
+        mostrar_aviso('aprob_reencauche')
 
         if st.session_state.get('nivel', 99) != 1:
             st.warning("⚠️ Solo el administrador puede aprobar reencauches")
@@ -1699,13 +1750,13 @@ def ver_llantas_disponibles():
                             aprobadas += 1
 
                         escribir_hoja(SHEET_LLANTAS, df_todos)
-                        st.success(f"✅ {aprobadas} llantas aprobadas - Marca: {marca_reencauche}, Ref: {referencia_reencauche}, Precio: ${precio_reencauche:,.0f}")
-                        st.rerun()
+                        avisar_y_recargar('aprob_reencauche', f"✅ {aprobadas} llantas aprobadas - Marca: {marca_reencauche}, Ref: {referencia_reencauche}, Precio: ${precio_reencauche:,.0f}")
             else:
                 st.info("✨ No hay llantas pendientes de aprobación de reencauche")
     
     with tab3:
         st.subheader("💰 Análisis de Costos por Kilómetro")
+        mostrar_aviso('costos')
         
         # Seleccionar llanta para análisis
         id_llanta_analisis = st.selectbox(
@@ -1723,8 +1774,7 @@ def ver_llantas_disponibles():
         # Botón para recalcular costos
         if st.button("🔄 Recalcular Costos/km", type="secondary"):
             if actualizar_costos_km_llanta(id_llanta_analisis):
-                st.success("✅ Costos recalculados exitosamente")
-                st.rerun()
+                avisar_y_recargar('costos', "✅ Costos recalculados exitosamente")
             else:
                 st.error("❌ Error al recalcular costos")
         
@@ -1776,6 +1826,7 @@ def ver_llantas_disponibles():
 
     with tab4:
         st.subheader("💲 Asignación de Precios")
+        mostrar_aviso('precios')
 
         if st.session_state.get('nivel', 99) != 1:
             st.warning("⚠️ Solo el administrador puede asignar precios")
@@ -1870,8 +1921,7 @@ def ver_llantas_disponibles():
                         df_todos.loc[mascara, 'fecha_modificacion'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         df_todos = recalcular_costos_km_lote(df_todos, leer_hoja(SHEET_SERVICIOS), ids_seleccionados)
                         escribir_hoja(SHEET_LLANTAS, df_todos)
-                        st.success(f"✅ Precio vida {vida_precio} de ${precio_masivo:,.0f} asignado a {len(ids_seleccionados)} llantas")
-                        st.rerun()
+                        avisar_y_recargar('precios', f"✅ Precio vida {vida_precio} de ${precio_masivo:,.0f} asignado a {len(ids_seleccionados)} llantas")
 
             # ---------- EDICIÓN INDIVIDUAL ----------
             st.divider()
@@ -1921,8 +1971,7 @@ def ver_llantas_disponibles():
                             df_todos.loc[mascara, 'fecha_modificacion'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         df_todos = recalcular_costos_km_lote(df_todos, leer_hoja(SHEET_SERVICIOS), cambiadas['id_llanta'].astype(str).tolist())
                         escribir_hoja(SHEET_LLANTAS, df_todos)
-                        st.success(f"✅ Precios actualizados en {len(cambiadas)} llantas")
-                        st.rerun()
+                        avisar_y_recargar('precios', f"✅ Precios actualizados en {len(cambiadas)} llantas")
 
 # Continuará en la siguiente parte debido a límite de caracteres...
 
@@ -1940,12 +1989,13 @@ def crear_cliente():
     
     with tab1:
         st.subheader("Crear Nuevo Cliente")
+        mostrar_aviso('cliente')
         
         col1, col2 = st.columns(2)
         
         with col1:
-            nit = st.text_input("NIT (10 dígitos)", max_chars=10)
-            nombre_cliente = st.text_input("Nombre del Cliente")
+            nit = st.text_input("NIT (10 dígitos)", max_chars=10, key="cliente_nit")
+            nombre_cliente = st.text_input("Nombre del Cliente", key="cliente_nombre")
         
         with col2:
             num_frentes = st.number_input("Número de Frentes", min_value=0, max_value=20, value=1)
@@ -1960,11 +2010,6 @@ def crear_cliente():
                     if frente:
                         frentes.append(frente)
         
-        # Mostrar mensaje de éxito si viene de crear cliente
-        if st.session_state.get('cliente_creado'):
-            st.success("✅ ¡Cliente creado con éxito!")
-            st.session_state['cliente_creado'] = False
-
         # Evitar doble click
         guardando = st.session_state.get('guardando_cliente', False)
 
@@ -2002,9 +2047,9 @@ def crear_cliente():
                         st.error("❌ No se pudo guardar el cliente. Revisa los logs.")
                         st.session_state['guardando_cliente'] = False
                     else:
-                        st.session_state['cliente_creado'] = True
                         st.session_state['guardando_cliente'] = False
-                        st.rerun()
+                        avisar_y_recargar('cliente', f"✅ Cliente {nombre_cliente} creado con éxito - ID: **{id_cliente}**",
+                                          limpiar=['cliente_nit', 'cliente_nombre'] + [f"frente_{i}" for i in range(num_frentes)])
     
     with tab2:
         df_clientes = leer_hoja(SHEET_CLIENTES)
@@ -2073,6 +2118,7 @@ def crear_vehiculos():
     
     with tab1:
         st.subheader("Registrar Nuevo Vehículo")
+        mostrar_aviso('vehiculo')
         
         col1, col2, col3 = st.columns(3)
 
@@ -2089,7 +2135,7 @@ def crear_vehiculos():
             )
 
             # ID del usuario (opcional) - el sistema generará un ID único
-            id_vehiculo_usuario = st.text_input("ID Vehículo (opcional)", placeholder="Ej: V01, 123, etc.")
+            id_vehiculo_usuario = st.text_input("ID Vehículo (opcional)", placeholder="Ej: V01, 123, etc.", key="veh_id_usuario")
             st.caption("💡 El sistema generará un ID único: [Cliente][Frente][Consecutivo]_[Tu ID]")
 
             marca = st.text_input("Marca (ej: Freightliner)")
@@ -2100,7 +2146,7 @@ def crear_vehiculos():
                 st.selectbox("Tipología", options=tipologias_disponibles)
                 if tipologias_disponibles else ""
             )
-            placa_vehiculo = st.text_input("Placa del Vehículo").upper()
+            placa_vehiculo = st.text_input("Placa del Vehículo", key="veh_placa").upper()
         
         with col3:
             frentes_raw = df_clientes[df_clientes['nit']==cliente_seleccionado]['frentes'].values[0]
@@ -2111,7 +2157,7 @@ def crear_vehiculos():
                 frente = st.text_input("Frente (sin frentes definidos)", value="General")
             
             estado = st.selectbox("Estado", ["no_asignado", "activo", "fuera_de_servicio"])
-            kilometraje_inicial = st.number_input("Kilometraje Inicial", min_value=0, value=0)
+            kilometraje_inicial = st.number_input("Kilometraje Inicial", min_value=0, value=0, key="veh_km_inicial")
         
         calculo_kms = st.selectbox("Cálculo de Kilómetros", ["odometro", "promedio", "tabla"])
         
@@ -2147,9 +2193,8 @@ def crear_vehiculos():
                     if resultado is None:
                         st.error("❌ No se pudo guardar el vehículo. Revisa los logs.")
                     else:
-                        st.success(f"✅ Vehículo creado con éxito - ID: **{id_vehiculo}**")
-                        st.balloons()
-                        st.rerun()                
+                        avisar_y_recargar('vehiculo', f"✅ Vehículo {placa_vehiculo} creado con éxito - ID: **{id_vehiculo}**",
+                                          limpiar=['veh_id_usuario', 'veh_placa', 'veh_km_inicial'])
       
     with tab2:
         df_vehiculos = leer_hoja(SHEET_VEHICULOS)
@@ -2228,6 +2273,7 @@ def crear_llantas():
     
     with tab1:
         st.subheader("Registrar Nueva Llanta")
+        mostrar_aviso('llanta')
         
         col1, col2 = st.columns(2)
 
@@ -2288,16 +2334,26 @@ def crear_llantas():
                 dimension = ""
 
             # ID del usuario (opcional) - el sistema generará un ID único
-            id_llanta_usuario = st.text_input("ID Llanta (opcional)", placeholder="Ej: L01, 123, etc.")
+            id_llanta_usuario = st.text_input("ID Llanta (opcional)", placeholder="Ej: L01, 123, etc.", key="llanta_id_usuario")
             st.caption("💡 El sistema generará un ID único: [Cliente][Frente][Consecutivo]_[Tu ID]")
 
         if st.button("💾 Registrar Llanta", type="primary"):
+            # Leer datos frescos SIN caché para verificar duplicados
+            df_llantas = leer_hoja_fresco(SHEET_LLANTAS)
+            id_usuario_limpio = id_llanta_usuario.strip() if id_llanta_usuario else ''
+            repetida = None
+            if id_usuario_limpio and not df_llantas.empty:
+                mismas = df_llantas[
+                    (df_llantas['nit_cliente'].astype(str) == str(cliente_seleccionado)) &
+                    (df_llantas['id_llanta'].astype(str).str.endswith(f"_{id_usuario_limpio}"))
+                ]
+                repetida = None if mismas.empty else mismas.iloc[0]['id_llanta']
+
             if not dimension or not referencia or not marca_llanta:
                 st.error("Debes completar todos los campos")
+            elif repetida:
+                st.error(f"⚠️ Ya existe una llanta de este cliente con el ID opcional **{id_usuario_limpio}**: **{repetida}**. No se creó la llanta.")
             else:
-                # Leer datos frescos SIN caché para verificar duplicados
-                df_llantas = leer_hoja_fresco(SHEET_LLANTAS)
-
                 # Generar ID único para la llanta incluyendo el frente
                 id_llanta = generar_id_unico(cliente_seleccionado, frente=frente_llanta, tipo='llanta')
                 # Anexar ID opcional del usuario si fue proporcionado
@@ -2335,9 +2391,8 @@ def crear_llantas():
 
                 df_llantas = pd.concat([df_llantas, nueva_llanta], ignore_index=True)
                 escribir_hoja(SHEET_LLANTAS, df_llantas)
-                st.success(f"✅ Llanta creada con éxito - ID: **{id_llanta}**")
-                st.balloons()
-                st.rerun()
+                avisar_y_recargar('llanta', f"✅ Llanta creada con éxito - ID: **{id_llanta}**",
+                                  limpiar=['llanta_id_usuario'])
     
     with tab2:
         df_llantas = leer_hoja(SHEET_LLANTAS)
@@ -2369,12 +2424,15 @@ def montaje_llantas(embedded=False):
         if not verificar_permiso(3):
             return
 
+    mostrar_aviso('montaje')
+
     df_llantas = leer_hoja_fresco(SHEET_LLANTAS)
     df_vehiculos = leer_hoja(SHEET_VEHICULOS)
 
     clientes_acceso = obtener_clientes_accesibles()
     df_llantas = filtrar_por_clientes(df_llantas, 'nit_cliente', clientes_acceso)
     df_vehiculos = filtrar_por_clientes(df_vehiculos, 'nit_cliente', clientes_acceso)
+    df_vehiculos = filtrar_cliente(df_vehiculos, 'nit_cliente', cliente_servicios())
 
     if df_vehiculos.empty:
         st.warning("⚠️ No hay vehículos registrados para tus clientes")
@@ -2382,7 +2440,7 @@ def montaje_llantas(embedded=False):
 
     # Verificar que el DataFrame tiene las columnas necesarias
     if df_llantas.empty or 'disponibilidad' not in df_llantas.columns or 'estado_reencauche' not in df_llantas.columns:
-        st.warning("⚠️ No hay llantas registradas o no se pueden cargar los datos")
+        st.warning("⚠️ No hay llantas registradas para el cliente seleccionado")
         return
 
     # Campos de orden de trabajo y planilla (primeras columnas)
@@ -2401,7 +2459,8 @@ def montaje_llantas(embedded=False):
         placa_vehiculo = st.selectbox(
             "1️⃣ Seleccionar Vehículo",
             options=df_vehiculos['placa_vehiculo'].values,
-            format_func=lambda x: f"{x} - {df_vehiculos[df_vehiculos['placa_vehiculo']==x]['marca'].values[0] if 'marca' in df_vehiculos.columns else ''}"
+            format_func=lambda x: f"{x} - {df_vehiculos[df_vehiculos['placa_vehiculo']==x]['marca'].values[0] if 'marca' in df_vehiculos.columns else ''}",
+            key="montaje_placa"
         )
 
     # Obtener el nit_cliente y kilometraje del vehículo seleccionado
@@ -2424,7 +2483,8 @@ def montaje_llantas(embedded=False):
             id_llanta = st.selectbox(
                 "2️⃣ Seleccionar Llanta",
                 options=llantas_disponibles['id_llanta'].values,
-                format_func=lambda x: f"ID {x} - {llantas_disponibles[llantas_disponibles['id_llanta']==x]['marca_llanta'].values[0]} {llantas_disponibles[llantas_disponibles['id_llanta']==x]['dimension'].values[0]} (Vida {int(llantas_disponibles[llantas_disponibles['id_llanta']==x]['vida_actual'].values[0]) if 'vida_actual' in llantas_disponibles.columns and pd.notna(llantas_disponibles[llantas_disponibles['id_llanta']==x]['vida_actual'].values[0]) else 1})"
+                format_func=lambda x: f"ID {x} - {llantas_disponibles[llantas_disponibles['id_llanta']==x]['marca_llanta'].values[0]} {llantas_disponibles[llantas_disponibles['id_llanta']==x]['dimension'].values[0]} (Vida {int(llantas_disponibles[llantas_disponibles['id_llanta']==x]['vida_actual'].values[0]) if 'vida_actual' in llantas_disponibles.columns and pd.notna(llantas_disponibles[llantas_disponibles['id_llanta']==x]['vida_actual'].values[0]) else 1})",
+                key="montaje_llanta"
             )
 
     # Verificar posiciones ocupadas en el vehículo seleccionado
@@ -2459,9 +2519,9 @@ def montaje_llantas(embedded=False):
 
     col3, col4 = st.columns(2)
     with col3:
-        posicion = st.text_input("3️⃣ Posición (ej: DI, DD, TI1)")
+        posicion = st.text_input("3️⃣ Posición (ej: DI, DD, TI1)", key="montaje_posicion")
     with col4:
-        kilometraje = st.number_input("4️⃣ Kilometraje del Vehículo", min_value=0, value=0)
+        kilometraje = st.number_input("4️⃣ Kilometraje del Vehículo", min_value=0, value=0, key="montaje_km")
 
     # Validar si la posición ingresada ya está ocupada
     # Normalizar igual que las posiciones almacenadas
@@ -2482,7 +2542,7 @@ def montaje_llantas(embedded=False):
     else:
         operario = st.text_input("👷 Operario", placeholder="No hay operarios asignados a este cliente", key="montaje_operario_txt")
 
-    if st.button("🔧 Montar Llanta", type="primary"):
+    if st.button("🔧 Montar Llanta", type="primary", key="montaje_btn"):
         if id_llanta is None:
             st.error("No hay llantas disponibles para montar")
         elif not posicion:
@@ -2588,9 +2648,11 @@ def montaje_llantas(embedded=False):
             df_servicios = pd.concat([df_servicios, nuevo_servicio], ignore_index=True)
             escribir_hoja(SHEET_SERVICIOS, df_servicios)
 
-            st.success(f"✅ Llanta ID {id_llanta} montada en vehículo {placa_vehiculo} - Posición: {posicion} - Km: {kilometraje:,}")
-            st.info(f"📋 Servicio de montaje registrado: {id_servicio}")
-            st.rerun()
+            avisar_y_recargar(
+                'montaje',
+                f"✅ Llanta {id_llanta} montada en el vehículo {placa_vehiculo} - Posición: {posicion} - Km: {kilometraje:,}"
+                f"  \n📋 Servicio de montaje registrado: {id_servicio}",
+                limpiar=['montaje_llanta', 'montaje_posicion'])
 
 def registrar_servicios(embedded=False):
     """Función para registrar servicios de mantenimiento"""
@@ -2602,15 +2664,18 @@ def registrar_servicios(embedded=False):
         if not verificar_permiso(3):
             return
 
+    mostrar_aviso('servicio')
+
     df_llantas = leer_hoja(SHEET_LLANTAS)
     df_vehiculos = leer_hoja(SHEET_VEHICULOS)
 
     clientes_acceso = obtener_clientes_accesibles()
     df_llantas = filtrar_por_clientes(df_llantas, 'nit_cliente', clientes_acceso)
+    df_llantas = filtrar_cliente(df_llantas, 'nit_cliente', cliente_servicios())
 
     # Verificar que el DataFrame tiene la columna necesaria
     if df_llantas.empty or 'disponibilidad' not in df_llantas.columns:
-        st.warning("⚠️ No hay llantas registradas o no se pueden cargar los datos")
+        st.warning("⚠️ No hay llantas registradas para el cliente seleccionado")
         return
 
     llantas_en_piso = df_llantas[df_llantas['disponibilidad'] == 'al_piso']
@@ -2624,6 +2689,12 @@ def registrar_servicios(embedded=False):
     # Determinar nombre de columna de placa (compatibilidad)
     placa_col = 'placa_actual' if 'placa_actual' in llantas_en_piso.columns else 'placa_vehiculo'
     pos_col = 'posicion_actual' if 'posicion_actual' in llantas_en_piso.columns else 'pos_final'
+
+    # Filtro de vehículo para acortar la lista de llantas
+    placas_srv = sorted(llantas_en_piso[placa_col].dropna().astype(str).unique()) if placa_col in llantas_en_piso.columns else []
+    filtro_placa_srv = st.selectbox("🚛 Vehículo", options=['Todos'] + placas_srv, key="srv_filtro_placa")
+    if filtro_placa_srv != 'Todos':
+        llantas_en_piso = llantas_en_piso[llantas_en_piso[placa_col].astype(str) == filtro_placa_srv]
 
     # Campos de orden de trabajo y planilla (primeras columnas)
     col_ot1, col_ot2 = st.columns(2)
@@ -2809,14 +2880,16 @@ def registrar_servicios(embedded=False):
         # ACTUALIZAR COSTOS/KM AUTOMÁTICAMENTE
         actualizar_costos_km_llanta(id_llanta)
 
-        st.success(f"✅ Servicio {id_servicio} registrado exitosamente para llanta ID {id_llanta}")
+        mensaje = f"✅ Servicio {id_servicio} registrado para la llanta {id_llanta} ({tipo_servicio})"
         if regrabacion:
-            st.info(f"🔧 Regrabación registrada. Total regrabaciones: {regrabaciones_nuevo}")
-        st.info("💡 Los costos/km se han actualizado automáticamente")
+            mensaje += f"  \n🔧 Regrabación registrada. Total regrabaciones: {regrabaciones_nuevo}"
+        mensaje += "  \n💡 Los costos/km se actualizaron automáticamente"
 
         st.session_state['servicio_completado'] = True
         st.session_state['id_llanta_servicio'] = id_llanta
-        st.rerun()
+        avisar_y_recargar('servicio', mensaje, limpiar=[
+            'srv_prof1', 'srv_prof2', 'srv_prof3', 'srv_balanceo', 'srv_reparacion', 'srv_despinche',
+            'srv_regrabacion', 'srv_torqueo', 'srv_inspeccion', 'srv_insumos'])
 
     if st.session_state.get('servicio_completado', False):
         st.divider()
@@ -2971,14 +3044,17 @@ def desmontaje_llantas(embedded=False):
         if not verificar_permiso(2):
             return
 
+    mostrar_aviso('desmontaje')
+
     df_llantas = leer_hoja(SHEET_LLANTAS)
 
     clientes_acceso = obtener_clientes_accesibles()
     df_llantas = filtrar_por_clientes(df_llantas, 'nit_cliente', clientes_acceso)
+    df_llantas = filtrar_cliente(df_llantas, 'nit_cliente', cliente_servicios())
 
     # Verificar que el DataFrame tiene la columna necesaria
     if df_llantas.empty or 'disponibilidad' not in df_llantas.columns:
-        st.warning("⚠️ No hay llantas registradas o no se pueden cargar los datos")
+        st.warning("⚠️ No hay llantas registradas para el cliente seleccionado")
         return
 
     llantas_montadas = df_llantas[df_llantas['disponibilidad'] == 'al_piso']
@@ -2986,6 +3062,13 @@ def desmontaje_llantas(embedded=False):
     if llantas_montadas.empty:
         st.warning("⚠️ No hay llantas montadas para desmontar")
         return
+
+    # Filtro de vehículo para acortar la lista de llantas
+    placa_col_desm = 'placa_actual' if 'placa_actual' in llantas_montadas.columns else 'placa_vehiculo'
+    placas_desm = sorted(llantas_montadas[placa_col_desm].dropna().astype(str).unique()) if placa_col_desm in llantas_montadas.columns else []
+    filtro_placa_desm = st.selectbox("🚛 Vehículo", options=['Todos'] + placas_desm, key="desm_filtro_placa")
+    if filtro_placa_desm != 'Todos':
+        llantas_montadas = llantas_montadas[llantas_montadas[placa_col_desm].astype(str) == filtro_placa_desm]
 
     # Campos de orden de trabajo y planilla (primeras columnas)
     col_ot1, col_ot2 = st.columns(2)
@@ -3142,10 +3225,11 @@ def desmontaje_llantas(embedded=False):
             df_servicios = pd.concat([df_servicios, nuevo_servicio], ignore_index=True)
             escribir_hoja(SHEET_SERVICIOS, df_servicios)
 
-            st.success(mensaje)
-            st.info(f"📊 Km recorridos este período: **{km_recorridos:,.0f}** | Total acumulado: **{nuevo_total_km:,.0f}** km")
-            st.info(f"📋 Servicio de desmontaje registrado: {id_servicio}")
-            st.rerun()
+            avisar_y_recargar(
+                'desmontaje',
+                f"{mensaje}  \n📊 Km recorridos este período: **{km_recorridos:,.0f}** | Total acumulado: **{nuevo_total_km:,.0f}** km"
+                f"  \n📋 Servicio de desmontaje registrado: {id_servicio}",
+                limpiar=['desm_id_llanta', 'desm_nueva_disp', 'desm_km', 'desm_razon_fvu'])
 
 # ============= FUNCIÓN: REGISTRAR ALINEACIÓN =============
 def registrar_alineacion(embedded=False):
@@ -3158,6 +3242,8 @@ def registrar_alineacion(embedded=False):
         if not verificar_permiso(3):
             return
 
+    mostrar_aviso('alineacion')
+
     clientes_acceso = obtener_clientes_accesibles()
 
     if not clientes_acceso:
@@ -3166,6 +3252,7 @@ def registrar_alineacion(embedded=False):
 
     df_vehiculos = leer_hoja(SHEET_VEHICULOS)
     df_vehiculos = filtrar_por_clientes(df_vehiculos, 'nit_cliente', clientes_acceso)
+    df_vehiculos = filtrar_cliente(df_vehiculos, 'nit_cliente', cliente_servicios())
 
     # Solo vehículos activos
     if 'estado' in df_vehiculos.columns:
@@ -3257,8 +3344,8 @@ def registrar_alineacion(embedded=False):
             df_alineaciones = pd.concat([df_alineaciones, nueva_alineacion], ignore_index=True)
             escribir_hoja(SHEET_ALINEACIONES, df_alineaciones)
 
-            st.success(f"✅ Alineación #{nuevo_id} registrada exitosamente para vehículo {placa_vehiculo}")
-            st.balloons()
+            avisar_y_recargar('alineacion', f"✅ Alineación {nuevo_id} registrada para el vehículo {placa_vehiculo}",
+                              limpiar=['alineacion_placa', 'alineacion_km', 'alineacion_obs'])
 
     with tab2:
         st.subheader("Historial de Alineaciones")
@@ -3289,11 +3376,14 @@ def registrar_alineacion(embedded=False):
 def rotacion_completa():
     """Función para realizar rotación completa de llantas en un vehículo"""
 
+    mostrar_aviso('rotacion')
+
     df_llantas = leer_hoja_fresco(SHEET_LLANTAS)
     df_vehiculos = leer_hoja(SHEET_VEHICULOS)
 
     clientes_acceso = obtener_clientes_accesibles()
     df_vehiculos = filtrar_por_clientes(df_vehiculos, 'nit_cliente', clientes_acceso)
+    df_vehiculos = filtrar_cliente(df_vehiculos, 'nit_cliente', cliente_servicios())
     df_llantas = filtrar_por_clientes(df_llantas, 'nit_cliente', clientes_acceso)
 
     if df_vehiculos.empty:
@@ -3519,10 +3609,8 @@ def rotacion_completa():
                 )
 
             resumen = " | ".join([f"{ll['id_llanta']}: {ll['pos_anterior']}→{ll['pos_nueva']}" for ll in llantas_rotadas])
-            st.success(f"✅ Rotación completada: {len(llantas_rotadas)} llanta(s) rotadas")
-            st.info(f"📋 {resumen}")
-            st.balloons()
-            st.rerun()
+            avisar_y_recargar('rotacion', f"✅ Rotación completada en {placa_vehiculo}: {len(llantas_rotadas)} llanta(s) rotadas  \n📋 {resumen}",
+                              limpiar=['rot_km'] + [f"rot_pos_{id_ll}" for id_ll in nuevas_posiciones])
 
 
 # ============= FUNCIÓN: SERVICIOS INTEGRADOS (WRAPPER CON TABS) =============
@@ -3534,6 +3622,9 @@ def servicios_integrados():
 
     if not verificar_permiso(3):
         return
+
+    # Un solo filtro de cliente para todas las pestañas de servicios
+    st.session_state['_srv_cliente_nit'] = selector_cliente("srv_filtro_cliente")
 
     tab_srv, tab_montaje, tab_desmontaje, tab_alineacion, tab_rotacion = st.tabs([
         "🛠️ Registro de Servicio",
@@ -3833,6 +3924,7 @@ def mi_perfil():
     usuario_data = usuario_data.iloc[0]
 
     st.subheader("Editar mis datos")
+    mostrar_aviso('perfil')
 
     col1, col2 = st.columns(2)
 
@@ -3876,8 +3968,7 @@ def mi_perfil():
             st.session_state['usuario'] = nuevo_usuario
             st.session_state['nombre'] = nuevo_nombre
 
-            st.success("✅ Perfil actualizado con éxito")
-            st.rerun()
+            avisar_y_recargar('perfil', "✅ Perfil actualizado con éxito")
 
 def gestion_usuarios():
     """Función para gestionar usuarios (solo nivel 1)"""
@@ -3892,6 +3983,7 @@ def gestion_usuarios():
 
     with tab1:
         st.subheader("Crear Nuevo Usuario")
+        mostrar_aviso('usuario')
 
         col1, col2 = st.columns(2)
 
@@ -3946,9 +4038,8 @@ def gestion_usuarios():
 
                     df_usuarios = pd.concat([df_usuarios, nuevo_user], ignore_index=True)
                     escribir_hoja(SHEET_USUARIOS, df_usuarios)
-                    st.success(f"✅ Usuario creado con éxito - ID: {id_usuario}")
-                    st.balloons()
-                    st.rerun()
+                    avisar_y_recargar('usuario', f"✅ Usuario {nuevo_usuario} creado con éxito - ID: {id_usuario}",
+                                      limpiar=['crear_nuevo_usuario', 'crear_nombre_completo', 'crear_password'])
     
     with tab2:
         df_usuarios = leer_hoja(SHEET_USUARIOS)
@@ -3984,6 +4075,7 @@ def gestion_usuarios():
 
     with tab3:
         st.subheader("Editar o Eliminar Usuario")
+        mostrar_aviso('ed_usuario')
 
         df_usuarios = leer_hoja(SHEET_USUARIOS)
         df_clientes = leer_hoja(SHEET_CLIENTES)
@@ -4078,16 +4170,14 @@ def gestion_usuarios():
                                 df_todos.loc[df_todos['usuario'] == edit_usuario, 'password_hash'] = edit_password
 
                             escribir_hoja(SHEET_USUARIOS, df_todos)
-                            st.success("✅ Usuario actualizado con éxito")
-                            st.rerun()
+                            avisar_y_recargar('ed_usuario', "✅ Usuario actualizado con éxito")
 
                 with col_btn2:
                     if st.button("🗑️ Eliminar Usuario", key="eliminar_usuario"):
                         df_todos = leer_hoja(SHEET_USUARIOS)
                         df_todos = df_todos[df_todos['usuario'] != usuario_editar]
                         escribir_hoja(SHEET_USUARIOS, df_todos)
-                        st.success("✅ Usuario eliminado con éxito")
-                        st.rerun()
+                        avisar_y_recargar('ed_usuario', "✅ Usuario eliminado con éxito")
         else:
             st.info("No hay usuarios registrados")
 

@@ -102,6 +102,8 @@ Abra la pestaña **Ver Vehículos** para revisar los vehículos asociados a los 
 5. Deje vacío **ID Llanta** para que el sistema lo genere automáticamente, salvo que deba conservar un identificador existente.
 6. Seleccione **Registrar Llanta**.
 
+El sistema muestra un mensaje verde con el ID asignado y limpia el campo **ID Llanta**; cliente, frente, marca, diseño y dimensión se conservan para registrar la siguiente llanta. No se permite repetir un **ID Llanta** opcional dentro del mismo cliente.
+
 ### Consultar llantas
 
 Abra la pestaña **Ver Llantas** para consultar el inventario disponible para los clientes asignados.
@@ -123,6 +125,10 @@ Las opciones de aprobación de reencauches y asignación de precios requieren pe
 ## 8. Servicios
 
 Ingrese a **Servicios**. El módulo contiene las pestañas **Registro de Servicio**, **Montaje**, **Desmontaje**, **Alineación** y **Rotación Completa**.
+
+Arriba de las pestañas está el selector de **Cliente**, que filtra vehículos y llantas en todas ellas (no aparece si el usuario tiene un solo cliente). En **Registro de Servicio** y **Desmontaje** también puede filtrar por **Vehículo** para encontrar la llanta más rápido.
+
+Al guardar cualquier operación aparece un mensaje verde con el resultado y el formulario se limpia, conservando la orden de trabajo, la planilla y los datos que suelen repetirse (por ejemplo, el vehículo en montaje o la fecha y el kilometraje en registro de servicio).
 
 ### Registrar un servicio
 
@@ -206,7 +212,7 @@ Los archivos exportados pueden contener información operativa o personal. No lo
 
 ## 10. Corrección y eliminación de datos
 
-Los usuarios autorizados pueden ingresar a **Editar/Eliminar Datos** y seleccionar una de estas pestañas:
+Los usuarios autorizados pueden ingresar a **Editar/Eliminar Datos** y seleccionar una de estas pestañas. Las pestañas Vehículos, Llantas, Servicios, Rotaciones, Alineaciones y Movimientos tienen su propio filtro de **Cliente**:
 
 - **Vehículos**
 - **Llantas**
