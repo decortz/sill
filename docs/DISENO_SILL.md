@@ -6,7 +6,7 @@
 | **Empresa** | Megallanta |
 | **Repositorio** | `decortz/sill` (rama `main`) |
 | **Tecnología** | Python · Streamlit · Supabase (PostgreSQL) |
-| **Código fuente** | `docs/codigo_completo_sill.txt` |
+| **Código fuente** | `docs/sillv6.txt` |
 | **Fecha** | Octubre 2026 |
 
 ---
@@ -200,6 +200,6 @@ flowchart LR
 
 El código completo y actual (`sill.py`, `db.py` y `requirements.txt`) está en:
 
-**`docs/codigo_completo_sill.txt`**
+**`docs/sillv6.txt`**
 
 Dependencias: `streamlit`, `pandas`, `plotly`, `openpyxl`, `supabase`.
