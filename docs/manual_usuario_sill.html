@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Manual de Usuario SILL</title>
+<style>
+  @page { size: Letter; margin: 16mm 16mm 18mm 16mm; }
+  :root { --azul: #2A2D62; --amarillo: #F2B705; --gris: #5c5c5c; --claro: #F4F5FA; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; color: #222; font-size: 10.5pt; line-height: 1.45; margin: 0; }
+  h1, h2, h3 { color: var(--azul); margin: 0; }
+  h2 { font-size: 16pt; padding: 6px 0 6px 12px; border-left: 6px solid var(--amarillo); margin: 0 0 10px; }
+  h3 { font-size: 11.5pt; margin: 12px 0 4px; }
+  p { margin: 4px 0 8px; }
+  ul, ol { margin: 4px 0 8px; padding-left: 20px; }
+  li { margin: 2px 0; }
+  b, strong { color: var(--azul); }
+  .page { page-break-after: always; }
+  .page:last-child { page-break-after: auto; }
+
+  /* Portada */
+  .cover { height: 236mm; display: flex; flex-direction: column; justify-content: space-between; }
+  .cover .top { text-align: center; padding-top: 30mm; }
+  .cover .top img { width: 120mm; }
+  .cover .band { background: var(--azul); color: #fff; border-radius: 10px; padding: 18px 22px; text-align: center; }
+  .cover .band h1 { color: #fff; font-size: 26pt; letter-spacing: .5px; }
+  .cover .band p { color: var(--amarillo); font-size: 13pt; margin: 6px 0 0; }
+  .cover .bottom { text-align: center; }
+  .cover .bottom img { width: 70mm; }
+  .cover .bottom p { color: var(--gris); font-size: 9pt; margin-top: 6px; }
+
+  /* Encabezado de página */
+  .head { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid var(--amarillo); padding-bottom: 6px; margin-bottom: 14px; }
+  .head img.sill { height: 13mm; }
+  .head img.mega { height: 11mm; }
+
+  .card { background: var(--claro); border-radius: 8px; padding: 10px 14px; margin: 8px 0 10px; }
+  .tip { background: #FFF7D6; border-left: 5px solid var(--amarillo); border-radius: 6px; padding: 8px 12px; margin: 8px 0; }
+  .tip b { color: #7a5b00; }
+
+  table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 9.8pt; }
+  th { background: var(--azul); color: #fff; text-align: left; padding: 6px 8px; }
+  td { padding: 5px 8px; border-bottom: 1px solid #dde0ec; vertical-align: top; }
+  tr:nth-child(even) td { background: #fafbfe; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 4px; }
+  .chip { border-radius: 14px; padding: 4px 10px; font-weight: 600; font-size: 9.5pt; color: #fff; background: var(--azul); }
+  .chip.y { background: var(--amarillo); color: var(--azul); }
+  .chip.g { background: #8a8d99; }
+  .arrow { color: var(--amarillo); font-weight: 700; }
+
+  .two { display: flex; gap: 14px; }
+  .two > div { flex: 1; }
+  .step { display: flex; gap: 10px; margin: 6px 0; }
+  .num { flex: 0 0 22px; height: 22px; border-radius: 50%; background: var(--amarillo); color: var(--azul); font-weight: 700; text-align: center; line-height: 22px; font-size: 10pt; }
+</style>
+</head>
+<body>
+
+<!-- PORTADA -->
+<section class="page cover">
+  <div class="top"><img src="assets/logo-sill.jpg" alt="SILL Web"></div>
+  <div class="band">
+    <h1>Manual de Usuario</h1>
+    <p>Sistema Integrado de Llantas</p>
+  </div>
+  <div class="bottom">
+    <img src="assets/logo-megallanta.png" alt="Megallanta">
+    <p>Guía rápida para usuarios y empleados nuevos · Octubre 2026</p>
+  </div>
+</section>
+
+<!-- 1. QUÉ ES SILL / INGRESO / MENÚ -->
+<section class="page">
+  <div class="head"><img class="sill" src="assets/logo-sill.jpg" alt="SILL"><img class="mega" src="assets/logo-megallanta.png" alt="Megallanta"></div>
+
+  <h2>1. ¿Qué es SILL?</h2>
+  <p>SILL es la herramienta de Megallanta para <b>controlar las llantas de cada flota</b>: dónde está cada llanta, qué servicios ha recibido, cuánto se ha desgastado y cuánto cuesta por kilómetro.</p>
+  <p>Todo lo que se hace en el taller (montar, revisar, rotar, desmontar) se registra en SILL. Así cada llanta tiene su historia completa.</p>
+
+  <h2 style="margin-top:14px">2. Ingresar al sistema</h2>
+  <div class="step"><div class="num">1</div><div>Abra el enlace de SILL que le entregó el administrador.</div></div>
+  <div class="step"><div class="num">2</div><div>Escriba su <b>usuario</b> y <b>contraseña</b> y pulse <b>Iniciar sesión</b>.</div></div>
+  <div class="step"><div class="num">3</div><div>En el menú de la izquierda elija lo que quiere hacer. Al terminar, pulse <b>Cerrar sesión</b>.</div></div>
+  <div class="tip"><b>Importante:</b> su usuario es personal. Todo lo que registre queda a su nombre. Puede cambiar su contraseña en <b>Mi Perfil</b>.</div>
+
+  <h2 style="margin-top:14px">3. ¿Qué puedo ver?</h2>
+  <p>El menú cambia según su nivel. Cada usuario solo ve la información de los clientes que tiene asignados.</p>
+  <table>
+    <tr><th style="width:24%">Nivel</th><th>Puede usar</th></tr>
+    <tr><td><b>1 · Administrador</b></td><td>Todo el sistema: clientes, usuarios, carga de archivos, precios y aprobación de reencauches.</td></tr>
+    <tr><td><b>2 · Supervisor</b></td><td>Vehículos, llantas, estado de llantas, servicios, reportes y corrección de datos.</td></tr>
+    <tr><td><b>3 · Operario</b></td><td>Llantas, estado de llantas, servicios y reportes.</td></tr>
+    <tr><td><b>4 · Admin Cliente</b></td><td>Lo mismo que el supervisor, solo para sus propios clientes.</td></tr>
+  </table>
+
+  <h2 style="margin-top:14px">4. Estados de una llanta</h2>
+  <p>Cada llanta siempre está en uno de estos estados:</p>
+  <div class="chips">
+    <span class="chip">Nueva</span><span class="arrow">→</span>
+    <span class="chip y">Montada (al piso)</span><span class="arrow">→</span>
+    <span class="chip">Recambio</span><span class="arrow">/</span>
+    <span class="chip">Reencauche</span><span class="arrow">/</span>
+    <span class="chip g">FVU (fuera de uso)</span>
+  </div>
+  <ul>
+    <li><b>Recambio:</b> se desmontó y puede volver a montarse.</li>
+    <li><b>Reencauche:</b> fue a planta. Cuando el administrador lo aprueba, la llanta empieza una nueva <b>vida</b> (hasta 4) y vuelve a quedar disponible.</li>
+    <li><b>FVU:</b> terminó su vida útil.</li>
+  </ul>
+</section>
+
+<!-- 2. REGISTRAR DATOS Y SERVICIOS -->
+<section class="page">
+  <div class="head"><img class="sill" src="assets/logo-sill.jpg" alt="SILL"><img class="mega" src="assets/logo-megallanta.png" alt="Megallanta"></div>
+
+  <h2>5. Registrar vehículos y llantas</h2>
+  <div class="two">
+    <div class="card">
+      <h3>🚛 Gestión de Vehículos</h3>
+      <p>Elija cliente y frente, escriba placa, marca y línea, seleccione la tipología y el kilometraje inicial. Pulse <b>Registrar Vehículo</b>.</p>
+    </div>
+    <div class="card">
+      <h3>⚙️ Gestión de Llantas</h3>
+      <p>Elija cliente y frente, luego marca, diseño y dimensión. Si la llanta ya tiene un número propio, escríbalo en <b>ID Llanta (opcional)</b>. Pulse <b>Registrar Llanta</b>.</p>
+    </div>
+  </div>
+  <div class="tip"><b>¿Se guardó?</b> Siempre aparece un <b>mensaje verde</b> con el código asignado y el formulario se limpia. Si no ve el mensaje, revise antes de volver a guardar. El sistema no permite repetir un ID opcional en el mismo cliente.</div>
+
+  <h2 style="margin-top:14px">6. Servicios (trabajo de taller)</h2>
+  <p>En <b>🛠️ Servicios</b> elija primero el <b>cliente</b> en la parte superior. Ese filtro aplica a todas las pestañas.</p>
+  <table>
+    <tr><th style="width:22%">Pestaña</th><th>Para qué sirve y cómo se hace</th></tr>
+    <tr><td><b>Registro de Servicio</b></td><td>Revisión de una llanta montada. Filtre por vehículo, elija la llanta, la fecha y el kilometraje, anote las 3 profundidades (interna, centro, externa) y marque los trabajos: balanceo, reparación, despinche, regrabación, torqueo o inspección.</td></tr>
+    <tr><td><b>Montaje</b></td><td>Poner una llanta en un vehículo. Elija el vehículo, la llanta disponible, la posición (ej.: DI, DD, TI1) y el kilometraje. El sistema avisa si la posición está ocupada.</td></tr>
+    <tr><td><b>Desmontaje</b></td><td>Quitar una llanta. Elija la llanta, el kilometraje y el destino: recambio, reencauche o FVU (con la razón).</td></tr>
+    <tr><td><b>Alineación</b></td><td>Registrar la alineación de un vehículo con su kilometraje y observaciones.</td></tr>
+    <tr><td><b>Rotación Completa</b></td><td>Cambiar llantas de posición. Elija el vehículo, escriba la nueva posición de cada llanta que se mueve y pulse <b>Ejecutar Rotación</b>.</td></tr>
+  </table>
+  <div class="tip"><b>Recuerde:</b> la posición de una llanta montada <b>solo</b> se cambia en <b>Rotación Completa</b>. Diligencie siempre la <b>orden de trabajo</b>, la <b>planilla</b> y el <b>operario</b>.</div>
+</section>
+
+<!-- 3. ESTADO, REPORTES, CORRECCIONES -->
+<section class="page">
+  <div class="head"><img class="sill" src="assets/logo-sill.jpg" alt="SILL"><img class="mega" src="assets/logo-megallanta.png" alt="Megallanta"></div>
+
+  <h2>7. Estado de llantas</h2>
+  <ul>
+    <li><b>Ver todas:</b> inventario con filtros por cliente, frente y estado.</li>
+    <li><b>Aprobar reencauches</b> <i>(administrador)</i>: marque las llantas que la planta aprobó, escriba marca, referencia y precio, y pulse <b>Aprobar seleccionadas</b>.</li>
+    <li><b>Análisis de costos:</b> precio y costo por kilómetro de cada vida de una llanta.</li>
+    <li><b>Asignación de precios</b> <i>(administrador)</i>: filtre las llantas, elija la vida y el precio, márquelas y pulse <b>Aplicar a seleccionadas</b>.</li>
+  </ul>
+
+  <h2 style="margin-top:14px">8. Reportes</h2>
+  <p>En <b>📊 Reportes y Análisis</b> encuentra el desgaste de cada llanta, los servicios por llanta y por vehículo, el estado general de la flota y la opción de <b>descargar</b> la información en archivos CSV (se abren en Excel).</p>
+
+  <h2 style="margin-top:14px">9. Corregir o eliminar un registro</h2>
+  <p>En <b>✏️ Editar/Eliminar Datos</b> elija la pestaña (Vehículos, Llantas, Servicios, Rotaciones, Alineaciones, Clientes o Movimientos), filtre por cliente, seleccione el registro, corrija y pulse <b>Guardar Cambios</b>.</p>
+  <ul>
+    <li>Prefiera <b>corregir</b> antes que eliminar: eliminar borra parte de la historia de la llanta.</li>
+    <li>Las rotaciones se corrigen en su propia pestaña <b>Rotaciones</b>.</li>
+  </ul>
+
+  <h2 style="margin-top:14px">10. Problemas frecuentes</h2>
+  <table>
+    <tr><th style="width:38%">Situación</th><th>Qué hacer</th></tr>
+    <tr><td>No aparece un cliente, vehículo o llanta</td><td>Revise el filtro de cliente. Si no está en la lista, pida al administrador que se lo asigne.</td></tr>
+    <tr><td>No aparece la llanta para montar</td><td>Solo se montan llantas nuevas, de recambio o con reencauche aprobado del mismo cliente del vehículo.</td></tr>
+    <tr><td>No puedo registrar un servicio</td><td>La llanta debe estar montada y tener posición. Si no la tiene, asígnela en Rotación Completa.</td></tr>
+    <tr><td>La posición está ocupada</td><td>Desmonte primero la otra llanta o use Rotación Completa.</td></tr>
+    <tr><td>“No tienes permisos suficientes”</td><td>Esa opción no corresponde a su nivel. Consulte al administrador.</td></tr>
+  </table>
+
+  <div class="card" style="margin-top:14px; text-align:center;">
+    <b>¿Dudas?</b> Comuníquese con el administrador del sistema en Megallanta.
+  </div>
+</section>
+
+</body>
+</html>
