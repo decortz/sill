@@ -87,6 +87,8 @@ El sistema no permite guardar un NIT repetido, un nombre vacío o frentes sin no
 
 La placa no puede estar registrada previamente.
 
+La **Tipología** define cuántas posiciones tiene el vehículo y no se puede modificar después de registrarlo. Si se eligió una tipología equivocada, elimine el vehículo en **Editar/Eliminar Datos** y vuelva a crearlo.
+
 ### Consultar vehículos
 
 Abra la pestaña **Ver Vehículos** para revisar los vehículos asociados a los clientes disponibles para su usuario.
@@ -151,12 +153,12 @@ Solo se pueden registrar servicios para llantas montadas y con posición asignad
 2. Ingrese la orden de trabajo y la planilla, cuando correspondan.
 3. Seleccione el vehículo.
 4. Seleccione una llanta disponible.
-5. Digite la posición de montaje.
+5. Digite el número de la posición de montaje (1, 2, 3…).
 6. Registre el kilometraje actual del vehículo.
 7. Seleccione o escriba el operario.
 8. Seleccione **Montar Llanta**.
 
-No utilice una posición que ya esté ocupada. El kilometraje debe ser mayor que cero.
+No utilice una posición que ya esté ocupada. La posición debe existir en la tipología del vehículo: por ejemplo, un vehículo de 7 posiciones solo acepta de 1 a 7 (incluido el repuesto). El kilometraje debe ser mayor que cero.
 
 ### Desmontar una llanta
 
@@ -187,7 +189,7 @@ Use **Historial de Alineaciones** para consultar registros anteriores y filtrarl
 3. Seleccione un vehículo activo con al menos dos llantas montadas.
 4. Registre el kilometraje actual.
 5. En **Asignar nuevas posiciones**, indique la nueva posición de cada llanta.
-6. Verifique que no existan posiciones repetidas y que al menos una posición haya cambiado.
+6. Verifique que no existan posiciones repetidas, que al menos una posición haya cambiado y que las posiciones nuevas existan en la tipología del vehículo.
 7. Seleccione o escriba el operario.
 8. Seleccione **Ejecutar Rotación**.
 
@@ -214,7 +216,7 @@ Los archivos exportados pueden contener información operativa o personal. No lo
 
 Los usuarios autorizados pueden ingresar a **Editar/Eliminar Datos** y seleccionar una de estas pestañas. Las pestañas Vehículos, Llantas, Servicios, Rotaciones, Alineaciones y Movimientos tienen su propio filtro de **Cliente**:
 
-- **Vehículos**
+- **Vehículos** (la tipología no se puede editar; para cambiarla, elimine el vehículo y vuelva a crearlo)
 - **Llantas**
 - **Servicios** (solo servicios de mantenimiento; las rotaciones y movimientos se editan en sus pestañas)
 - **Rotaciones**
@@ -236,7 +238,7 @@ Cada rotación de una llanta guarda un servicio y un movimiento. En la pestaña 
 2. Corrija la fecha, el kilometraje, la posición anterior, la posición nueva, la orden de trabajo, la planilla o el operario.
 3. Pulse **Guardar Cambios**.
 
-Si es la rotación más reciente de la llanta, al cambiar la posición nueva también se actualiza la posición actual de la llanta. El sistema no permite asignar una posición ocupada por otra llanta del mismo vehículo.
+Si es la rotación más reciente de la llanta, al cambiar la posición nueva también se actualiza la posición actual de la llanta. El sistema no permite asignar una posición ocupada por otra llanta del mismo vehículo ni una posición que no exista en su tipología.
 
 Al eliminar una rotación se borran el servicio y el movimiento. Si es la más reciente de la llanta y la posición anterior está libre, puede marcar **Devolver la llanta a la posición…** para dejarla donde estaba.
 
@@ -310,7 +312,7 @@ Verifique que la llanta esté montada, que tenga posición asignada (si no la ti
 
 ### No puedo ejecutar una rotación
 
-Confirme que el vehículo esté activo, tenga al menos dos llantas montadas, no existan posiciones repetidas y haya al menos un cambio de posición.
+Confirme que el vehículo esté activo, tenga al menos dos llantas montadas, no existan posiciones repetidas, haya al menos un cambio de posición y las posiciones nuevas existan en la tipología del vehículo.
 
 ### El sistema muestra un error de conexión o no carga información
 

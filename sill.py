@@ -997,6 +997,10 @@ def editar_rotaciones():
         (df_llantas['id_llanta'].astype(str) != rot['id_llanta'])
     ]
 
+    df_vehiculos = leer_hoja(SHEET_VEHICULOS)
+    vehiculo_rot = df_vehiculos[df_vehiculos['placa_vehiculo'].astype(str) == rot['placa_vehiculo']]
+    total_posiciones = posiciones_tipologia(vehiculo_rot.iloc[0].get('tipologia')) if not vehiculo_rot.empty else None
+
     def llanta_en_posicion(posicion):
         ocupada = otras_montadas[otras_montadas['posicion_actual'].apply(normalizar_posicion) == normalizar_posicion(posicion)]
         return None if ocupada.empty else str(ocupada.iloc[0]['id_llanta'])
@@ -1009,10 +1013,16 @@ def editar_rotaciones():
         if st.button("💾 Guardar Cambios", key="guardar_rotacion", type="primary"):
             cambia_posicion = normalizar_posicion(nueva_pos_nueva) != normalizar_posicion(rot['pos_nueva'])
             ocupante = llanta_en_posicion(nueva_pos_nueva) if es_ultima and cambia_posicion else None
+            errores_pos = [error_posicion(nueva, total_posiciones)
+                           for nueva, original in ((nueva_pos_anterior, rot['pos_anterior']), (nueva_pos_nueva, rot['pos_nueva']))
+                           if nueva and normalizar_posicion(nueva) != normalizar_posicion(original)]
+            errores_pos = [e for e in errores_pos if e]
             if not nueva_pos_nueva:
                 st.error("⚠️ La posición nueva es obligatoria")
             elif normalizar_posicion(nueva_pos_anterior) == normalizar_posicion(nueva_pos_nueva):
                 st.error("⚠️ La posición anterior y la nueva no pueden ser iguales")
+            elif errores_pos:
+                st.error(f"⚠️ {errores_pos[0]}")
             elif ocupante:
                 st.error(f"⚠️ La posición **{nueva_pos_nueva}** está ocupada por la llanta **{ocupante}** en el vehículo {rot['placa_vehiculo']}. Corrige primero esa llanta.")
             else:
@@ -1193,7 +1203,8 @@ def eliminar_corregir_datos():
                     nuevo_km_inicial = st.number_input("Kilometraje Inicial", value=float(vehiculo.get('kilometraje_inicial', 0)), key=f"edit_km_vehiculo_{id_editar}")
 
                 with col3:
-                    nueva_tipologia = st.text_input("Tipología", value=vehiculo.get('tipologia', ''), key=f"edit_tipologia_vehiculo_{id_editar}")
+                    st.text_input("Tipología", value=vehiculo.get('tipologia', ''), disabled=True, key=f"edit_tipologia_vehiculo_{id_editar}",
+                                  help="La tipología no se puede editar. Para cambiarla, elimine el vehículo y vuelva a crearlo.")
                     nuevo_calculo = st.selectbox("Cálculo KMs",
                         options=['odometro', 'promedio', 'tabla'],
                         index=['odometro', 'promedio', 'tabla'].index(vehiculo.get('calculo_kms', 'odometro')),
@@ -1205,7 +1216,6 @@ def eliminar_corregir_datos():
                         df_todos = leer_hoja(SHEET_VEHICULOS)
                         df_todos.loc[df_todos['id_vehiculo'] == id_editar, 'marca'] = nueva_marca
                         df_todos.loc[df_todos['id_vehiculo'] == id_editar, 'linea'] = nueva_linea
-                        df_todos.loc[df_todos['id_vehiculo'] == id_editar, 'tipologia'] = nueva_tipologia
                         df_todos.loc[df_todos['id_vehiculo'] == id_editar, 'estado'] = nuevo_estado
                         df_todos.loc[df_todos['id_vehiculo'] == id_editar, 'kilometraje_inicial'] = nuevo_km_inicial
                         df_todos.loc[df_todos['id_vehiculo'] == id_editar, 'calculo_kms'] = nuevo_calculo
@@ -2089,6 +2099,45 @@ def cargar_catalogo_tipologias():
     return sorted(tipologias.values(), key=str.casefold)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def cargar_posiciones_tipologias():
+    """Cantidad de posiciones por tipología (clave en minúsculas), desde catalogo_tipologias."""
+    try:
+        respuesta = (
+            get_supabase_client()
+            .table("catalogo_tipologias")
+            .select("tipologia, posiciones")
+            .execute()
+        )
+    except Exception:
+        return {}
+    posiciones = {}
+    for fila in respuesta.data:
+        tipologia = str(fila.get("tipologia") or "").strip().casefold()
+        try:
+            cantidad = int(fila.get("posiciones"))
+        except (ValueError, TypeError):
+            continue
+        if tipologia and cantidad > 0:
+            posiciones[tipologia] = cantidad
+    return posiciones
+
+
+def posiciones_tipologia(tipologia):
+    """Cantidad de posiciones de una tipología; None si no está configurada en el catálogo"""
+    return cargar_posiciones_tipologias().get(texto_limpio(tipologia).casefold())
+
+
+def error_posicion(posicion, total_posiciones):
+    """Mensaje de error si la posición no existe en el vehículo; '' si es válida o no hay catálogo"""
+    if not total_posiciones:
+        return ''
+    pos = normalizar_posicion(posicion)
+    if not pos.isdigit() or not 1 <= int(pos) <= total_posiciones:
+        return f"La posición **{posicion}** no existe: este vehículo tiene posiciones de 1 a {total_posiciones}."
+    return ''
+
+
 def crear_vehiculos():
     """Función para crear vehículos asociados a cliente y frente"""
     
@@ -2519,7 +2568,7 @@ def montaje_llantas(embedded=False):
 
     col3, col4 = st.columns(2)
     with col3:
-        posicion = st.text_input("3️⃣ Posición (ej: DI, DD, TI1)", key="montaje_posicion")
+        posicion = st.text_input("3️⃣ Posición (ej: 1, 2, 3)", key="montaje_posicion")
     with col4:
         kilometraje = st.number_input("4️⃣ Kilometraje del Vehículo", min_value=0, value=0, key="montaje_km")
 
@@ -2531,7 +2580,14 @@ def montaje_llantas(embedded=False):
     except (ValueError, TypeError):
         posicion_normalizada = posicion_stripped.upper()
     posicion_ocupada = posicion_normalizada in posiciones_ocupadas if posicion_normalizada else False
-    if posicion_ocupada:
+    tipologia_montaje = vehiculo_seleccionado.iloc[0].get('tipologia', '') if not vehiculo_seleccionado.empty else ''
+    total_posiciones = posiciones_tipologia(tipologia_montaje)
+    if total_posiciones is None:
+        st.caption(f"ℹ️ La tipología **{tipologia_montaje or 'sin definir'}** no tiene cantidad de posiciones en el catálogo: no se valida el número de posición.")
+    posicion_invalida = error_posicion(posicion_stripped, total_posiciones) if posicion_stripped else ''
+    if posicion_invalida:
+        st.error(f"⚠️ {posicion_invalida}")
+    elif posicion_ocupada:
         st.error(f"⚠️ La posición **{posicion_normalizada}** ya está ocupada por la llanta **{posiciones_ocupadas[posicion_normalizada]}**. Desmonta esa llanta primero o elige otra posición.")
 
     # Obtener operarios del cliente
@@ -2547,6 +2603,8 @@ def montaje_llantas(embedded=False):
             st.error("No hay llantas disponibles para montar")
         elif not posicion:
             st.error("Debes especificar la posición")
+        elif posicion_invalida:
+            st.error(f"No se puede montar: {posicion_invalida}")
         elif posicion_ocupada:
             st.error(f"No se puede montar: la posición **{posicion_normalizada}** ya está ocupada por la llanta **{posiciones_ocupadas[posicion_normalizada]}**")
         elif kilometraje <= 0:
@@ -3514,13 +3572,24 @@ def rotacion_completa():
     pos_nuevas_list = [v for v in nuevas_posiciones.values() if v]
     hay_duplicados = len(pos_nuevas_list) != len(set(pos_nuevas_list))
 
+    # Validar que las posiciones cambiadas existan en la tipología del vehículo
+    total_posiciones = posiciones_tipologia(tipologia_rot)
+    if total_posiciones is None:
+        st.caption(f"ℹ️ La tipología **{tipologia_rot or 'sin definir'}** no tiene cantidad de posiciones en el catálogo: no se valida el número de posición.")
+    errores_pos = [error_posicion(nueva, total_posiciones)
+                   for id_ll, nueva in nuevas_posiciones.items()
+                   if nueva and nueva != posiciones_actuales[id_ll]]
+    errores_pos = [e for e in errores_pos if e]
+    for error in errores_pos:
+        st.error(f"⚠️ {error}")
+
     if hay_duplicados:
         st.error("⚠️ Hay posiciones duplicadas en la asignación. Cada llanta debe tener una posición única.")
 
     if not hay_cambio:
         st.warning("⚠️ No hay cambios de posición. Modifica al menos una posición para registrar la rotación.")
 
-    if st.button("🔄 Ejecutar Rotación", type="primary", key="rot_btn_ejecutar", disabled=(not hay_cambio or hay_duplicados)):
+    if st.button("🔄 Ejecutar Rotación", type="primary", key="rot_btn_ejecutar", disabled=(not hay_cambio or hay_duplicados or bool(errores_pos))):
         if kilometraje <= 0:
             st.error("Debes ingresar el kilometraje actual del vehículo")
         else:
