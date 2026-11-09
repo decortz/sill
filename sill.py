@@ -743,16 +743,23 @@ def login():
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        usuario = st.text_input("Usuario")
+        usuario = st.text_input("Usuario o ID usuario")
         password = st.text_input("Contraseña", type="password")
         
         if st.button("Iniciar Sesión", use_container_width=True):
             df_usuarios = leer_hoja(SHEET_USUARIOS)
-            user_data = df_usuarios[(df_usuarios['usuario'] == usuario) & (df_usuarios['password_hash'] == password)]
+            ingreso = usuario.strip()
+
+            # Se acepta el nombre de usuario o el ID de usuario (este último sin distinguir mayúsculas)
+            coincide = df_usuarios['usuario'] == ingreso
+            if 'id_usuario' in df_usuarios.columns and ingreso:
+                coincide = coincide | (df_usuarios['id_usuario'].astype(str).str.strip().str.upper() == ingreso.upper())
+            user_data = df_usuarios[coincide & (df_usuarios['password_hash'] == password)]
             
             if not user_data.empty:
                 st.session_state['logged_in'] = True
-                st.session_state['usuario'] = usuario
+                # Guardar siempre el nombre de usuario real, aunque se haya ingresado con el ID
+                st.session_state['usuario'] = user_data.iloc[0]['usuario']
                 st.session_state['nivel'] = int(user_data.iloc[0]['nivel'])
                 st.session_state['nombre'] = user_data.iloc[0]['nombre']
 
@@ -766,7 +773,7 @@ def login():
 
                 st.rerun()
             else:
-                st.error("Usuario o contraseña incorrectos")
+                st.error("Usuario, ID usuario o contraseña incorrectos")
 
 def verificar_permiso(nivel_requerido):
     """Verifica si el usuario tiene el nivel necesario"""

@@ -17,11 +17,11 @@ Las opciones visibles dependen del nivel de acceso y de los clientes asignados a
 ## 2. Acceso al sistema
 
 1. Abra en el navegador la dirección de SILL suministrada por el administrador.
-2. Escriba su **Usuario**.
+2. Escriba su **Usuario o ID usuario** (por ejemplo `admin` o `ADM001`; el ID no distingue mayúsculas).
 3. Escriba su **Contraseña**.
 4. Seleccione **Iniciar Sesión**.
 
-Si aparece el mensaje **Usuario o contraseña incorrectos**, verifique los datos e intente nuevamente. Si el problema continúa, contacte al administrador del sistema.
+Si aparece el mensaje **Usuario, ID usuario o contraseña incorrectos**, verifique los datos e intente nuevamente. Si el problema continúa, contacte al administrador del sistema.
 
 ### Cerrar sesión
 
@@ -290,7 +290,7 @@ Ingrese a **Mi Perfil** para consultar y actualizar sus datos personales disponi
 
 ### No puedo iniciar sesión
 
-Revise usuario y contraseña. Si el error continúa, solicite al administrador que confirme que el usuario existe y está activo.
+Revise usuario (o ID usuario) y contraseña. Si el error continúa, solicite al administrador que confirme que el usuario existe y está activo.
 
 ### No aparece un cliente o un vehículo
 
