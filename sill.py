@@ -743,7 +743,7 @@ def login():
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        usuario = st.text_input("Usuario ó ID usuario")
+        usuario = st.text_input("Usuario o ID usuario")
         password = st.text_input("Contraseña", type="password")
         
         if st.button("Iniciar Sesión", use_container_width=True):

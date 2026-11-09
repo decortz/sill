@@ -17,7 +17,7 @@ Las opciones visibles dependen del nivel de acceso y de los clientes asignados a
 ## 2. Acceso al sistema
 
 1. Abra en el navegador la dirección de SILL suministrada por el administrador.
-2. Escriba su **Usuario ó ID usuario** (por ejemplo `admin` o `ADM001`; el ID no distingue mayúsculas).
+2. Escriba su **Usuario o ID usuario** (por ejemplo `admin` o `ADM001`; el ID no distingue mayúsculas).
 3. Escriba su **Contraseña**.
 4. Seleccione **Iniciar Sesión**.
 
