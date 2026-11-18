@@ -3,7 +3,8 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import json
-from db import leer_hoja, leer_hoja_fresco, escribir_hoja, get_supabase_client
+from db import (leer_hoja, leer_hoja_fresco, escribir_hoja, get_supabase_client,
+                validar_carga_masiva, agregar_registros, contar_filas)
 
 # Nombres de las tablas (compatibilidad con código existente)
 SHEET_CLIENTES = "clientes"
@@ -784,7 +785,7 @@ def verificar_permiso(nivel_requerido):
 
 # ============= FUNCIÓN: SUBIR DATOS CSV =============
 def subir_datos_csv():
-    """Función para cargar datos desde archivos CSV usando append"""
+    """Carga masiva desde CSV: solo agrega filas nuevas (INSERT), nunca sobrescribe ni borra."""
 
     st.image("https://elchorroco.wordpress.com/wp-content/uploads/2025/10/megallanta-logo.png", width=200)
     st.header("📤 Subir Datos desde CSV")
@@ -801,49 +802,99 @@ def subir_datos_csv():
         options=["Clientes", "Vehículos", "Llantas", "Servicios", "Movimientos"]
     )
     
+    hojas = {
+        "Clientes": SHEET_CLIENTES,
+        "Vehículos": SHEET_VEHICULOS,
+        "Llantas": SHEET_LLANTAS,
+        "Servicios": SHEET_SERVICIOS,
+        "Movimientos": SHEET_MOVIMIENTOS,
+    }
+
+    st.info("ℹ️ La carga **solo agrega** registros nuevos. Nunca modifica ni borra "
+            "los datos que ya existen: se omiten las filas cuyo ID ya está en el sistema "
+            "y, en clientes y vehículos, las de un NIT o placa ya registrados.")
+
     archivo = st.file_uploader(f"Subir archivo CSV de {tipo_dato}", type=['csv'])
-    
+
     if archivo is not None:
         try:
-            df_nuevo = pd.read_csv(archivo, encoding='utf-8')
-            
-            st.write("**Vista previa de los datos:**")
-            st.dataframe(df_nuevo.head(), use_container_width=True, hide_index=True)
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button("✅ Confirmar y Agregar Datos", type="primary"):
-                    if tipo_dato == "Clientes":
-                        df_existente = leer_hoja(SHEET_CLIENTES)
-                        df_combinado = pd.concat([df_existente, df_nuevo], ignore_index=True)
-                        escribir_hoja(SHEET_CLIENTES, df_combinado)
-                    elif tipo_dato == "Vehículos":
-                        df_existente = leer_hoja(SHEET_VEHICULOS)
-                        df_combinado = pd.concat([df_existente, df_nuevo], ignore_index=True)
-                        escribir_hoja(SHEET_VEHICULOS, df_combinado)
-                    elif tipo_dato == "Llantas":
-                        df_existente = leer_hoja(SHEET_LLANTAS)
-                        df_combinado = pd.concat([df_existente, df_nuevo], ignore_index=True)
-                        escribir_hoja(SHEET_LLANTAS, df_combinado)
-                    elif tipo_dato == "Servicios":
-                        df_existente = leer_hoja(SHEET_SERVICIOS)
-                        df_combinado = pd.concat([df_existente, df_nuevo], ignore_index=True)
-                        escribir_hoja(SHEET_SERVICIOS, df_combinado)
-                    elif tipo_dato == "Movimientos":
-                        df_existente = leer_hoja(SHEET_MOVIMIENTOS)
-                        df_combinado = pd.concat([df_existente, df_nuevo], ignore_index=True)
-                        escribir_hoja(SHEET_MOVIMIENTOS, df_combinado)
-
-                    avisar_y_recargar('csv', f"✅ Datos de {tipo_dato} agregados exitosamente")
-            
-            with col2:
-                if st.button("❌ Cancelar"):
-                    st.rerun()
-                    
+            # dtype=str conserva ceros iniciales en NIT e IDs
+            df_nuevo = pd.read_csv(archivo, encoding='utf-8', dtype=str)
+            df_nuevo.columns = [str(c).strip() for c in df_nuevo.columns]
         except Exception as e:
             st.error(f"Error al leer el archivo: {str(e)}")
             st.info("Asegúrate de que el CSV tenga las columnas correctas y esté codificado en UTF-8")
+            return
+
+        st.write(f"**Vista previa de los datos** ({len(df_nuevo)} filas en el archivo):")
+        st.dataframe(df_nuevo.head(), use_container_width=True, hide_index=True)
+
+        try:
+            rev = validar_carga_masiva(hojas[tipo_dato], df_nuevo)
+        except Exception as e:
+            st.error(f"❌ No se puede cargar el archivo: {str(e)}")
+            return
+
+        pk = rev['pk']
+        n_nuevos = len(rev['df_nuevos'])
+
+        st.subheader("Revisión antes de agregar")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Registros actuales", f"{rev['total_actual']:,}")
+        c2.metric("Se agregarán", f"{n_nuevos:,}")
+        c3.metric("Total después", f"{rev['total_actual'] + n_nuevos:,}")
+
+        if rev['ids_existentes']:
+            st.warning(f"⚠️ {len(rev['ids_existentes'])} fila(s) tienen un `{pk}` que ya existe. "
+                       "Se **omitirán** y los datos actuales no se tocarán.")
+            with st.expander("Ver IDs que ya existen"):
+                st.write(", ".join(rev['ids_existentes']))
+        if rev['ids_duplicados_archivo']:
+            st.warning(f"⚠️ {len(rev['ids_duplicados_archivo'])} `{pk}` aparecen repetidos dentro del archivo. "
+                       "Esas filas se **omitirán**; corrija el archivo si deben cargarse.")
+            with st.expander("Ver IDs repetidos en el archivo"):
+                st.write(", ".join(rev['ids_duplicados_archivo']))
+        nombre_nat = {'placa_vehiculo': 'placa', 'nit': 'NIT'}.get(rev['llave_natural'], rev['llave_natural'])
+        if rev['naturales_existentes']:
+            st.warning(f"⚠️ {len(rev['naturales_existentes'])} {nombre_nat}(s) ya están registradas en el sistema "
+                       "(aunque tengan otro ID). Esas filas se **omitirán** para no duplicar.")
+            with st.expander(f"Ver {nombre_nat}s que ya existen"):
+                st.write(", ".join(rev['naturales_existentes']))
+        if rev['naturales_duplicados_archivo']:
+            st.warning(f"⚠️ {len(rev['naturales_duplicados_archivo'])} {nombre_nat}(s) aparecen repetidas dentro "
+                       "del archivo. Esas filas se **omitirán**; corrija el archivo si deben cargarse.")
+            with st.expander(f"Ver {nombre_nat}s repetidas en el archivo"):
+                st.write(", ".join(rev['naturales_duplicados_archivo']))
+        if rev['naturales_vacios']:
+            st.warning(f"⚠️ {rev['naturales_vacios']} fila(s) no tienen {nombre_nat} y se omitirán.")
+        if rev['ids_vacios']:
+            st.warning(f"⚠️ {rev['ids_vacios']} fila(s) no tienen `{pk}` y se omitirán.")
+        if rev['columnas_ignoradas']:
+            st.info("Columnas del archivo que no existen en la tabla y se ignorarán: "
+                    + ", ".join(rev['columnas_ignoradas']))
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button(f"✅ Agregar {n_nuevos} registros nuevos", type="primary",
+                         disabled=n_nuevos == 0):
+                antes = rev['total_actual']
+                try:
+                    with st.spinner("Agregando registros..."):
+                        insertadas = agregar_registros(rev['tabla'], rev['df_nuevos'])
+                except Exception as e:
+                    st.error(f"❌ Error al agregar: {str(e)}")
+                    st.info("Los registros que ya existían no fueron modificados.")
+                    return
+                despues = contar_filas(rev['tabla'])
+                omitidas = len(df_nuevo) - insertadas
+                avisar_y_recargar('csv', f"✅ {insertadas} registros de {tipo_dato} agregados. "
+                                         f"Antes: {antes:,} → Ahora: {despues:,}"
+                                         + (f" ({omitidas} fila(s) omitidas)" if omitidas else ""))
+
+        with col2:
+            if st.button("❌ Cancelar"):
+                st.rerun()
 
 # ============= FUNCIÓN: ELIMINAR Y CORREGIR DATOS =============
 # ============= EDICIÓN DE ROTACIONES Y ALINEACIONES =============
