@@ -811,7 +811,8 @@ def subir_datos_csv():
     }
 
     st.info("ℹ️ La carga **solo agrega** registros nuevos. Nunca modifica ni borra "
-            "los datos que ya existen: las filas cuyo ID ya está en el sistema se omiten.")
+            "los datos que ya existen: se omiten las filas cuyo ID ya está en el sistema "
+            "y, en clientes y vehículos, las de un NIT o placa ya registrados.")
 
     archivo = st.file_uploader(f"Subir archivo CSV de {tipo_dato}", type=['csv'])
 
@@ -853,6 +854,19 @@ def subir_datos_csv():
                        "Esas filas se **omitirán**; corrija el archivo si deben cargarse.")
             with st.expander("Ver IDs repetidos en el archivo"):
                 st.write(", ".join(rev['ids_duplicados_archivo']))
+        nombre_nat = {'placa_vehiculo': 'placa', 'nit': 'NIT'}.get(rev['llave_natural'], rev['llave_natural'])
+        if rev['naturales_existentes']:
+            st.warning(f"⚠️ {len(rev['naturales_existentes'])} {nombre_nat}(s) ya están registradas en el sistema "
+                       "(aunque tengan otro ID). Esas filas se **omitirán** para no duplicar.")
+            with st.expander(f"Ver {nombre_nat}s que ya existen"):
+                st.write(", ".join(rev['naturales_existentes']))
+        if rev['naturales_duplicados_archivo']:
+            st.warning(f"⚠️ {len(rev['naturales_duplicados_archivo'])} {nombre_nat}(s) aparecen repetidas dentro "
+                       "del archivo. Esas filas se **omitirán**; corrija el archivo si deben cargarse.")
+            with st.expander(f"Ver {nombre_nat}s repetidas en el archivo"):
+                st.write(", ".join(rev['naturales_duplicados_archivo']))
+        if rev['naturales_vacios']:
+            st.warning(f"⚠️ {rev['naturales_vacios']} fila(s) no tienen {nombre_nat} y se omitirán.")
         if rev['ids_vacios']:
             st.warning(f"⚠️ {rev['ids_vacios']} fila(s) no tienen `{pk}` y se omitirán.")
         if rev['columnas_ignoradas']:

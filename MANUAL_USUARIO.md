@@ -250,7 +250,11 @@ Esta función está destinada exclusivamente al administrador.
 4. Revise la vista previa y el bloque **Revisión antes de agregar**: registros actuales, cuántos se agregarán y el total esperado.
 5. Seleccione **Agregar N registros nuevos**.
 
-La carga **solo agrega**: nunca modifica ni borra los datos existentes. Se omiten (y se listan) las filas cuyo ID ya existe en el sistema, las que tienen el ID repetido dentro del mismo archivo y las que no tienen ID. Las columnas del archivo que no existen en la tabla se ignoran. Al terminar se muestra el total antes y después de la carga.
+La carga **solo agrega**: nunca modifica ni borra los datos existentes. Se omiten (y se listan) las filas cuyo ID ya existe en el sistema, las que tienen el ID repetido dentro del mismo archivo y las que no tienen ID. Además, igual que en el registro manual:
+
+- **Clientes:** se omiten los que no tienen **NIT** o cuyo NIT ya está registrado o repetido en el archivo.
+- **Vehículos:** se omiten los que no tienen **placa** o cuya placa ya está registrada o repetida en el archivo, aunque traigan otro ID. Las placas se guardan en mayúsculas.
+- **Llantas, servicios y movimientos:** solo se compara el ID, porque un dato repetido puede ser legítimo (por ejemplo, un servicio que se volvió a ejecutar). Las columnas del archivo que no existen en la tabla se ignoran. Al terminar se muestra el total antes y después de la carga.
 
 El archivo debe incluir la columna de ID de la tabla (`id_cliente`, `id_vehiculo`, `id_llanta`, `id_servicio` o `id_movimiento`). Utilice **Cancelar** si la estructura o la información no son correctas.
 

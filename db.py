@@ -245,13 +245,34 @@ def _id_texto(x) -> str:
     return '' if s.lower() in ('nan', 'none') else s
 
 
+# Dato "natural" que identifica un registro además de su ID.
+# Solo clientes (NIT) y vehículos (placa): en llantas y servicios un dato
+# repetido puede ser legítimo (p. ej. un servicio que se volvió a ejecutar).
+_LLAVES_NATURALES = {
+    "clientes": "nit",
+    "vehiculos": "placa_vehiculo",
+}
+
+
+def _norm_natural(col: str, x) -> str:
+    """Normaliza placa/NIT para comparar: sin espacios, puntos ni guiones, en mayúsculas."""
+    s = _id_texto(x)
+    if col == 'nit':
+        s = _normalize_nit(s)
+    for ch in (' ', '.', '-'):
+        s = s.replace(ch, '')
+    return s.upper()
+
+
 def validar_carga_masiva(nombre_hoja: str, df: pd.DataFrame) -> dict:
     """
     Revisa (sin escribir nada) un DataFrame que se quiere AGREGAR a una tabla.
     Retorna un dict con:
       tabla, pk, total_actual, df_nuevos (filas listas para insertar),
       ids_vacios (n.º de filas sin ID), ids_duplicados_archivo (lista),
-      ids_existentes (lista de IDs que ya están en la BD), columnas_ignoradas.
+      ids_existentes (lista de IDs que ya están en la BD), columnas_ignoradas,
+      llave_natural (columna o None), naturales_existentes (valores que ya
+      están en la BD), naturales_duplicados_archivo (repetidos en el archivo).
     """
     sb = get_supabase_client()
     df = df.copy()
@@ -281,7 +302,30 @@ def validar_carga_masiva(nombre_hoja: str, df: pd.DataFrame) -> dict:
     existentes = {_id_texto(r[pk]) for r in _select_all(sb, tabla, pk)}
     ids_existentes = sorted(set(df[pk]) & existentes)
 
-    df_nuevos = df[~dup_mask & ~df[pk].isin(existentes)]
+    omitir = dup_mask | df[pk].isin(existentes)
+
+    # Validación por dato natural (placa / NIT), igual que el registro manual
+    llave_natural = _LLAVES_NATURALES.get(tabla)
+    naturales_existentes, naturales_duplicados_archivo = [], []
+    naturales_vacios = 0
+    if llave_natural:
+        if llave_natural not in df.columns:
+            raise ValueError(f"El archivo no tiene la columna obligatoria '{llave_natural}'")
+        if llave_natural == 'placa_vehiculo':
+            df[llave_natural] = df[llave_natural].apply(lambda x: _id_texto(x).upper())
+        norm = df[llave_natural].apply(lambda x: _norm_natural(llave_natural, x))
+        vacio_nat = norm == ''
+        dup_nat = norm.duplicated(keep=False) & ~vacio_nat
+        en_bd = {_norm_natural(llave_natural, r[llave_natural])
+                 for r in _select_all(sb, tabla, llave_natural)}
+        en_bd.discard('')
+        existe_nat = norm.isin(en_bd)
+        naturales_existentes = sorted(df.loc[existe_nat, llave_natural].astype(str).unique().tolist())
+        naturales_duplicados_archivo = sorted(df.loc[dup_nat, llave_natural].astype(str).unique().tolist())
+        naturales_vacios = int((vacio_nat & ~omitir).sum())
+        omitir = omitir | dup_nat | existe_nat | vacio_nat
+
+    df_nuevos = df[~omitir]
 
     return {
         "tabla": tabla,
@@ -292,6 +336,10 @@ def validar_carga_masiva(nombre_hoja: str, df: pd.DataFrame) -> dict:
         "ids_duplicados_archivo": ids_duplicados_archivo,
         "ids_existentes": ids_existentes,
         "columnas_ignoradas": columnas_ignoradas,
+        "llave_natural": llave_natural,
+        "naturales_existentes": naturales_existentes,
+        "naturales_duplicados_archivo": naturales_duplicados_archivo,
+        "naturales_vacios": naturales_vacios,
     }
 
 
