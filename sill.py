@@ -867,6 +867,10 @@ def subir_datos_csv():
                 st.write(", ".join(rev['naturales_duplicados_archivo']))
         if rev['naturales_vacios']:
             st.warning(f"⚠️ {rev['naturales_vacios']} fila(s) no tienen {nombre_nat} y se omitirán.")
+        for col, info in rev['valores_invalidos'].items():
+            detalle = ", ".join(f'"{v}" ({n} fila(s))' for v, n in info['valores'].items())
+            st.warning(f"⚠️ Valores no válidos en la columna `{col}`: {detalle}. Esas filas se **omitirán**. "
+                       f"Valores permitidos: {', '.join(info['permitidos'])}.")
         if rev['ids_vacios']:
             st.warning(f"⚠️ {rev['ids_vacios']} fila(s) no tienen `{pk}` y se omitirán.")
         if rev['columnas_ignoradas']:

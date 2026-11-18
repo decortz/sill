@@ -254,6 +254,8 @@ La carga **solo agrega**: nunca modifica ni borra los datos existentes. Se omite
 
 - **Clientes:** se omiten los que no tienen **NIT** o cuyo NIT ya está registrado o repetido en el archivo.
 - **Vehículos:** se omiten los que no tienen **placa** o cuya placa ya está registrada o repetida en el archivo, aunque traigan otro ID. Las placas se guardan en mayúsculas.
+- **Vehículos, columna `estado`:** solo admite `no_asignado`, `activo` o `fuera_de_servicio` (se aceptan mayúsculas y espacios, p. ej. "Fuera de servicio"). Las filas con otro valor se omiten y se indica cuál fue.
+- **Llantas, columna `disponibilidad`:** solo admite `llanta_nueva`, `al_piso`, `recambio`, `reencauche` o `FVU` (se acepta en minúsculas, p. ej. "fvu").
 - **Llantas, servicios y movimientos:** solo se compara el ID, porque un dato repetido puede ser legítimo (por ejemplo, un servicio que se volvió a ejecutar). Las columnas del archivo que no existen en la tabla se ignoran. Al terminar se muestra el total antes y después de la carga.
 
 El archivo debe incluir la columna de ID de la tabla (`id_cliente`, `id_vehiculo`, `id_llanta`, `id_servicio` o `id_movimiento`). Utilice **Cancelar** si la estructura o la información no son correctas.

@@ -254,6 +254,18 @@ _LLAVES_NATURALES = {
 }
 
 
+# Valores permitidos por los enums de la base de datos (columna → valores)
+_VALORES_PERMITIDOS = {
+    "vehiculos": {"estado": ["no_asignado", "activo", "fuera_de_servicio"]},
+    "llantas": {"disponibilidad": ["llanta_nueva", "al_piso", "recambio", "reencauche", "FVU"]},
+}
+
+
+def _norm_enum(x) -> str:
+    """'Fuera de servicio' → 'fuera_de_servicio'."""
+    return '_'.join(_id_texto(x).lower().replace('-', ' ').split())
+
+
 def _norm_natural(col: str, x) -> str:
     """Normaliza placa/NIT para comparar: sin espacios, puntos ni guiones, en mayúsculas."""
     s = _id_texto(x)
@@ -325,6 +337,23 @@ def validar_carga_masiva(nombre_hoja: str, df: pd.DataFrame) -> dict:
         naturales_vacios = int((vacio_nat & ~omitir).sum())
         omitir = omitir | dup_nat | existe_nat | vacio_nat
 
+    # Valores de columnas tipo enum: se normalizan y los no válidos se omiten
+    valores_invalidos = {}
+    for col, permitidos in _VALORES_PERMITIDOS.get(tabla, {}).items():
+        if col not in df.columns:
+            continue
+        # Se compara sin mayúsculas/espacios y se guarda el valor oficial (p. ej. "fvu" → "FVU")
+        oficial = {_norm_enum(v): v for v in permitidos}
+        df[col] = df[col].apply(lambda x: oficial.get(_norm_enum(x), _norm_enum(x)))
+        malos = (df[col] != '') & ~df[col].isin(permitidos)
+        if malos.any():
+            valores_invalidos[col] = {
+                "permitidos": permitidos,
+                "valores": df.loc[malos, col].value_counts().to_dict(),
+            }
+            omitir = omitir | malos
+        df.loc[df[col] == '', col] = None
+
     df_nuevos = df[~omitir]
 
     return {
@@ -340,6 +369,7 @@ def validar_carga_masiva(nombre_hoja: str, df: pd.DataFrame) -> dict:
         "naturales_existentes": naturales_existentes,
         "naturales_duplicados_archivo": naturales_duplicados_archivo,
         "naturales_vacios": naturales_vacios,
+        "valores_invalidos": valores_invalidos,
     }
 
 
