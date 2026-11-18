@@ -64,13 +64,48 @@ MOV_TO_SERV_COLUMNS = {
 # Lectura
 # ─────────────────────────────────────────────────────────────
 
+# Supabase/PostgREST devuelve como máximo ~1000 filas por consulta.
+# Se lee por páginas para no perder registros en tablas grandes.
+_PAGE_SIZE = 1000
+
+# Columna para ordenar la paginación (orden estable entre páginas)
+_ORDER_COLS = {
+    "clientes": "id_cliente",
+    "vehiculos": "id_vehiculo",
+    "llantas": "id_llanta",
+    "servicios": "id_servicio",
+    "usuarios": "id_usuario",
+    "vw_movimientos": "id_servicio",
+    "alineaciones": "id_alineacion",
+}
+
+
+def _select_all(sb: Client, table_name: str, columns: str = "*", filtro=None) -> list:
+    """Lee TODAS las filas de una tabla/vista paginando de 1000 en 1000."""
+    order_col = _ORDER_COLS.get(table_name)
+    filas = []
+    inicio = 0
+    while True:
+        query = sb.table(table_name).select(columns)
+        if filtro is not None:
+            query = filtro(query)
+        if order_col:
+            query = query.order(order_col)
+        resp = query.range(inicio, inicio + _PAGE_SIZE - 1).execute()
+        lote = resp.data or []
+        filas.extend(lote)
+        if len(lote) < _PAGE_SIZE:
+            break
+        inicio += _PAGE_SIZE
+    return filas
+
+
 def leer_hoja(nombre_hoja: str) -> pd.DataFrame:
     """Lee una tabla/vista de Supabase y retorna un DataFrame."""
     try:
         sb = get_supabase_client()
         table_name = TABLE_MAP.get(nombre_hoja, nombre_hoja)
-        response = sb.table(table_name).select("*").execute()
-        data = response.data
+        data = _select_all(sb, table_name)
         if not data:
             return pd.DataFrame()
         df = pd.DataFrame(data)
@@ -119,8 +154,8 @@ def escribir_hoja(nombre_hoja: str, df: pd.DataFrame) -> pd.DataFrame | None:
         print(f"[DB] escribir_hoja({nombre_hoja}): {len(df_clean)} filas, columnas: {list(df_clean.columns)}")
 
         # Obtener PKs actuales en la BD
-        existing = sb.table(table_name).select(pk).execute()
-        existing_pks = {row[pk] for row in existing.data} if existing.data else set()
+        existing = _select_all(sb, table_name, pk)
+        existing_pks = {row[pk] for row in existing}
 
         # PKs en el nuevo DataFrame
         new_pks = set(df_clean[pk].astype(str).values)
@@ -171,11 +206,9 @@ def _escribir_movimientos(sb: Client, df: pd.DataFrame) -> pd.DataFrame | None:
         tipos_mov = ('montaje', 'desmontaje', 'rotacion', 'aprobacion_reencauche')
 
         # Obtener los movimientos existentes en servicios
-        existing = (sb.table("servicios")
-                    .select("id_servicio")
-                    .in_("tipo_servicio", list(tipos_mov))
-                    .execute())
-        existing_pks = {row["id_servicio"] for row in existing.data} if existing.data else set()
+        existing = _select_all(sb, "servicios", "id_servicio",
+                               filtro=lambda q: q.in_("tipo_servicio", list(tipos_mov)))
+        existing_pks = {row["id_servicio"] for row in existing}
 
         new_pks = set(df_serv[pk].astype(str).values)
 
@@ -199,6 +232,98 @@ def _escribir_movimientos(sb: Client, df: pd.DataFrame) -> pd.DataFrame | None:
     except Exception as e:
         st.error(f"Error escribiendo movimientos: {str(e)}")
         return None
+
+
+# ─────────────────────────────────────────────────────────────
+# Carga masiva: SOLO AGREGA (nunca modifica ni borra lo existente)
+# ─────────────────────────────────────────────────────────────
+
+def _id_texto(x) -> str:
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return ''
+    s = str(x).strip()
+    return '' if s.lower() in ('nan', 'none') else s
+
+
+def validar_carga_masiva(nombre_hoja: str, df: pd.DataFrame) -> dict:
+    """
+    Revisa (sin escribir nada) un DataFrame que se quiere AGREGAR a una tabla.
+    Retorna un dict con:
+      tabla, pk, total_actual, df_nuevos (filas listas para insertar),
+      ids_vacios (n.º de filas sin ID), ids_duplicados_archivo (lista),
+      ids_existentes (lista de IDs que ya están en la BD), columnas_ignoradas.
+    """
+    sb = get_supabase_client()
+    df = df.copy()
+
+    if nombre_hoja == "movimientos":
+        df = df.rename(columns=MOV_TO_SERV_COLUMNS)
+        tabla = "servicios"
+    else:
+        tabla = TABLE_MAP.get(nombre_hoja, nombre_hoja)
+    pk = PRIMARY_KEYS.get(tabla)
+    if not pk:
+        raise ValueError(f"No se conoce la llave primaria de {nombre_hoja}")
+    if pk not in df.columns:
+        raise ValueError(f"El archivo no tiene la columna obligatoria '{pk}'")
+
+    valid_cols = _get_table_columns(tabla) or set(df.columns)
+    columnas_ignoradas = [c for c in df.columns if c not in valid_cols]
+
+    df[pk] = df[pk].apply(_id_texto)
+    ids_vacios = int((df[pk] == '').sum())
+    df = df[df[pk] != '']
+
+    dup_mask = df[pk].duplicated(keep=False)
+    ids_duplicados_archivo = sorted(df.loc[dup_mask, pk].unique().tolist())
+
+    # IDs que ya existen en la tabla (todas las filas, con paginación)
+    existentes = {_id_texto(r[pk]) for r in _select_all(sb, tabla, pk)}
+    ids_existentes = sorted(set(df[pk]) & existentes)
+
+    df_nuevos = df[~dup_mask & ~df[pk].isin(existentes)]
+
+    return {
+        "tabla": tabla,
+        "pk": pk,
+        "total_actual": len(existentes),
+        "df_nuevos": df_nuevos,
+        "ids_vacios": ids_vacios,
+        "ids_duplicados_archivo": ids_duplicados_archivo,
+        "ids_existentes": ids_existentes,
+        "columnas_ignoradas": columnas_ignoradas,
+    }
+
+
+def agregar_registros(tabla: str, df_nuevos: pd.DataFrame, batch_size: int = 500) -> int:
+    """
+    Inserta filas NUEVAS en la tabla usando INSERT (no upsert, no delete).
+    Si algún ID ya existiera, la base de datos rechaza el lote en lugar de
+    sobrescribir. Retorna el número de filas insertadas.
+    """
+    if df_nuevos is None or df_nuevos.empty:
+        return 0
+    sb = get_supabase_client()
+    df_clean = _prepare_for_write(df_nuevos, tabla)
+    records = _clean_records(df_clean.to_dict(orient="records"))
+    insertadas = 0
+    for i in range(0, len(records), batch_size):
+        lote = records[i:i + batch_size]
+        try:
+            sb.table(tabla).insert(lote).execute()
+        except Exception as e:
+            raise RuntimeError(
+                f"Se insertaron {insertadas} de {len(records)} filas antes del error: {e}"
+            ) from e
+        insertadas += len(lote)
+    return insertadas
+
+
+def contar_filas(tabla: str) -> int:
+    """Cuenta las filas de una tabla."""
+    sb = get_supabase_client()
+    resp = sb.table(tabla).select(PRIMARY_KEYS.get(tabla, "*"), count="exact").limit(1).execute()
+    return resp.count or 0
 
 
 # ─────────────────────────────────────────────────────────────
