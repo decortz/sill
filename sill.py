@@ -867,6 +867,10 @@ def subir_datos_csv():
                 st.write(", ".join(rev['naturales_duplicados_archivo']))
         if rev['naturales_vacios']:
             st.warning(f"⚠️ {rev['naturales_vacios']} fila(s) no tienen {nombre_nat} y se omitirán.")
+        for col, info in rev['valores_invalidos'].items():
+            detalle = ", ".join(f'"{v}" ({n} fila(s))' for v, n in info['valores'].items())
+            st.warning(f"⚠️ Valores no válidos en la columna `{col}`: {detalle}. Esas filas se **omitirán**. "
+                       f"Valores permitidos: {', '.join(info['permitidos'])}.")
         if rev['ids_vacios']:
             st.warning(f"⚠️ {rev['ids_vacios']} fila(s) no tienen `{pk}` y se omitirán.")
         if rev['columnas_ignoradas']:
@@ -3171,7 +3175,7 @@ def desmontaje_llantas(embedded=False):
     razon_fvu = None
     if nueva_disponibilidad == 'FVU':
         with col4:
-            razon_fvu = st.text_input("Razón de FVU (Fuera de Uso)", key="desm_razon_fvu")
+            razon_fvu = st.text_input("Razón de FVU (Fin de vida útil)", key="desm_razon_fvu")
 
     # Obtener operarios del cliente
     nit_cliente_llanta = llanta_sel['nit_cliente']
@@ -3214,7 +3218,7 @@ def desmontaje_llantas(embedded=False):
                 df_llantas.loc[df_llantas['id_llanta'] == id_llanta, 'disponibilidad'] = 'FVU'
                 df_llantas.loc[df_llantas['id_llanta'] == id_llanta, 'estado_reencauche'] = ''
                 observaciones = f"FVU: {razon_fvu}"
-                mensaje = f"✅ Llanta ID {id_llanta} desmontada. Estado: FVU (Fuera de Uso)"
+                mensaje = f"✅ Llanta ID {id_llanta} desmontada. Estado: FVU (Fin de vida útil)"
             else:
                 df_llantas.loc[df_llantas['id_llanta'] == id_llanta, 'disponibilidad'] = 'recambio'
                 df_llantas.loc[df_llantas['id_llanta'] == id_llanta, 'estado_reencauche'] = ''
